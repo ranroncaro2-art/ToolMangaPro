@@ -3,7 +3,7 @@ import { AgGridReact } from 'ag-grid-react';
 import { ColDef, GridReadyEvent, CellValueChangedEvent } from 'ag-grid-community';
 import { useProjectStore, getCardTitle, findBestCharacterMatch, findBestExteriorMatch, parseCharactersField, findBestPropMatch } from '../store/useProjectStore';
 import * as XLSX from 'xlsx';
-import { Download, Database, Image as ImageIcon, Sparkles, User, Package, Sliders } from 'lucide-react';
+import { Download, Database, Image as ImageIcon, Sparkles, User, Package, Sliders, Play } from 'lucide-react';
 
 export default function ImagePromptGrid() {
   const {
@@ -252,13 +252,24 @@ export default function ImagePromptGrid() {
         <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/40 p-3 rounded-lg border border-slate-900">
           <div className="flex items-center gap-2">
             <button
-              onClick={generateImagePrompts}
+              onClick={() => generateImagePrompts(false)}
               disabled={isGeneratingImagePrompts || currentProject.sceneMapping.length === 0}
               className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 border border-gray-800 hover:border-gray-700 text-xs px-3.5 py-2 rounded text-slate-300 hover:text-slate-200 transition cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-400" />
               Regenerate Prompts
             </button>
+            {currentProject.imagePrompts && currentProject.imagePrompts.length > 0 && currentProject.imagePrompts.length < currentProject.sceneMapping.length && (
+              <button
+                onClick={() => generateImagePrompts(true)}
+                disabled={isGeneratingImagePrompts || currentProject.sceneMapping.length === 0}
+                className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 border border-gray-800 hover:border-gray-700 text-xs px-3.5 py-2 rounded text-violet-400 hover:text-violet-300 transition cursor-pointer"
+                title="Tiếp tục sinh các prompts cho các phân cảnh còn thiếu"
+              >
+                <Play className="w-3 h-3 fill-current" />
+                Tiếp tục tạo (Resume)
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
