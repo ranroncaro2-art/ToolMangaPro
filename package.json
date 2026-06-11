@@ -1,6 +1,6 @@
 {
   "name": "manga-storyboard",
-  "version": "3.0.2",
+  "version": "4.0.0",
   "private": true,
   "main": "main.js",
   "scripts": {
