@@ -30,29 +30,16 @@ function startNextServer() {
     ? path.join(process.resourcesPath, 'bin', 'node.exe')
     : 'node';
 
-  if (process.platform === 'win32') {
-    const cmdString = `"${nodeExe}" "${nextBin}" ${command} -p ${PORT}`;
-    console.log(`[Electron Launcher] Spawning Next.js server via command string: ${cmdString}`);
-    nextProcess = spawn(cmdString, [], {
-      cwd: appPath,
-      env: { 
-        ...process.env, 
-        NODE_ENV: isDev ? 'development' : 'production',
-        ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
-      },
-      shell: true
-    });
-  } else {
-    nextProcess = spawn(nodeExe, [nextBin, command, '-p', PORT.toString()], {
-      cwd: appPath,
-      env: { 
-        ...process.env, 
-        NODE_ENV: isDev ? 'development' : 'production',
-        ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
-      },
-      shell: false
-    });
-  }
+  console.log(`[Electron Launcher] Spawning Next.js server: "${nodeExe}" "${nextBin}" ${command} -p ${PORT}`);
+  nextProcess = spawn(nodeExe, [nextBin, command, '-p', PORT.toString()], {
+    cwd: appPath,
+    env: { 
+      ...process.env, 
+      NODE_ENV: isDev ? 'development' : 'production',
+      ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
+    },
+    shell: false
+  });
 
   nextProcess.stdout.on('data', (data) => {
     console.log(`[Next.js Server]: ${data.toString().trim()}`);

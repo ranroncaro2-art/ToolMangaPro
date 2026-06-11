@@ -9,6 +9,7 @@ export default function Header() {
     setApiConfig,
     currentProject,
     saveCurrentProject,
+    exportProject,
     tokenUsage,
     resetTokenUsage,
     imageGenConfig,
@@ -206,6 +207,15 @@ export default function Header() {
             title="Save Project"
           >
             <Save className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => currentProject.id && exportProject(currentProject.id)}
+            disabled={!currentProject.id}
+            className="p-1.5 rounded bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 text-slate-400 hover:text-slate-200 disabled:opacity-50 transition cursor-pointer"
+            title="Export Project"
+          >
+            <Download className="w-4 h-4" />
           </button>
         </div>
       </div>

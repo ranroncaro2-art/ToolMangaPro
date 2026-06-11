@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
-import { Plus, Folder, Copy, Trash2, Calendar, Database, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, Folder, Copy, Trash2, Calendar, Database, Upload, CheckCircle2, AlertTriangle, Download } from 'lucide-react';
 
 export default function HistorySidebar({ onNewProjectCreated }: { onNewProjectCreated?: () => void }) {
   const {
@@ -12,13 +12,39 @@ export default function HistorySidebar({ onNewProjectCreated }: { onNewProjectCr
     duplicateProject,
     currentProject,
     setSrtContent,
-    runningProjects
+    runningProjects,
+    exportProject,
+    importProject
   } = useProjectStore();
 
   const [showNameModal, setShowNameModal] = useState(false);
   const [projectNameInput, setProjectNameInput] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const data = JSON.parse(event.target?.result as string);
+          if (!data.name || !data.sceneMapping) {
+            throw new Error('Định dạng file dự án không hợp lệ (thiếu tên hoặc sceneMapping).');
+          }
+          await importProject(data);
+          if (importFileInputRef.current) {
+            importFileInputRef.current.value = '';
+          }
+        } catch (err: any) {
+          alert('Không thể import dự án: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
+
   const [dragActive, setDragActive] = useState(false);
   const [srtFile, setSrtFile] = useState<File | null>(null);
   const [srtContent, setSrtContentState] = useState('');
@@ -144,14 +170,30 @@ export default function HistorySidebar({ onNewProjectCreated }: { onNewProjectCr
   return (
     <aside className="w-full lg:w-72 bg-slate-950/40 border-r border-gray-900 flex flex-col h-full shrink-0">
       {/* Sidebar Header */}
-      <div className="p-4 border-b border-gray-900">
+      <div className="p-4 border-b border-gray-900 flex gap-2">
         <button
           onClick={handleNewProject}
-          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium py-2 px-4 rounded-lg shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 active:scale-98 transition text-sm cursor-pointer"
+          className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-medium py-2 px-3 rounded-lg shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 active:scale-98 transition text-xs cursor-pointer"
         >
-          <Plus className="w-4 h-4" />
+          <Plus className="w-3.5 h-3.5" />
           New Project
         </button>
+        <button
+          type="button"
+          onClick={() => importFileInputRef.current?.click()}
+          className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-slate-350 hover:text-slate-200 border border-gray-800 hover:border-gray-700 font-medium py-2 px-3 rounded-lg active:scale-98 transition text-xs cursor-pointer"
+          title="Import Project"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          Import
+        </button>
+        <input
+          type="file"
+          ref={importFileInputRef}
+          onChange={handleImportProjectFile}
+          accept=".json"
+          className="hidden"
+        />
       </div>
 
       {/* Project History List */}
@@ -218,6 +260,17 @@ export default function HistorySidebar({ onNewProjectCreated }: { onNewProjectCr
 
                 {/* Floating Actions on Hover */}
                 <div className="absolute right-2 top-2.5 hidden group-hover:flex items-center gap-1 bg-slate-900/90 p-1 rounded border border-gray-800 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      exportProject(project.id);
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"
+                    title="Export Project"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
                   <button
                     onClick={(e) => handleDuplicate(e, project.id)}
                     className="p-1 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition cursor-pointer"

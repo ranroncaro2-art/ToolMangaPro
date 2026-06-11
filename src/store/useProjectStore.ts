@@ -586,6 +586,8 @@ interface ProjectState {
   loadProject: (id: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   duplicateProject: (id: string) => Promise<void>;
+  exportProject: (id: string) => Promise<void>;
+  importProject: (projectData: any) => Promise<void>;
 
   // Character Reference
   characters: CharacterReference[];
@@ -2711,6 +2713,214 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       syncChannel?.postMessage({ type: 'project_updated', projectId: newProj.id });
     }
   },
+  exportProject: async (id) => {
+    try {
+      const proj = await getProject(id);
+      if (!proj) {
+        alert('Không tìm thấy dự án trong Database.');
+        return;
+      }
+
+      const exportData = JSON.parse(JSON.stringify(proj));
+      set({ batchStatus: "Đang đóng gói dữ liệu và mã hóa hình ảnh..." });
+
+      const toBase64 = async (url: string): Promise<string> => {
+        try {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {
+          console.warn(`Failed to convert image to base64 for export: ${url}`, e);
+          return '';
+        }
+      };
+
+      if (exportData.imagePrompts) {
+        for (const prompt of exportData.imagePrompts) {
+          if (prompt.imageUrl && !prompt.imageUrl.startsWith('data:')) {
+            const b64 = await toBase64(prompt.imageUrl);
+            if (b64) {
+              prompt.imageBase64 = b64;
+            }
+          }
+        }
+      }
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `${proj.name || 'storyboard'}_project.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      set({ batchStatus: "Xuất dự án thành công!" });
+    } catch (err: any) {
+      alert('Xuất dự án thất bại: ' + err.message);
+      set({ batchStatus: "" });
+    }
+  },
+  importProject: async (projectData) => {
+    try {
+      const newId = `proj_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const importedProject: any = {
+        ...projectData,
+        id: newId,
+        createdAt: new Date().toISOString(),
+        name: `${projectData.name || 'Imported Project'} (Imported)`
+      };
+
+      // Restore shot images base64
+      if (importedProject.imagePrompts) {
+        for (const prompt of importedProject.imagePrompts) {
+          if (prompt.imageBase64) {
+            prompt.imageUrl = prompt.imageBase64;
+            delete prompt.imageBase64;
+          }
+        }
+      }
+
+      // Save immediately so it appears in list
+      await saveProject(importedProject);
+      await get().loadHistory();
+      await get().loadProject(newId);
+      syncChannel?.postMessage({ type: 'project_updated', projectId: newId });
+
+      const statusToast = "Đang kiểm tra và tải lên các ảnh tham chiếu lên Google Drive...";
+      set({ batchStatus: statusToast });
+
+      const isMediaIdValid = async (mediaId: string): Promise<boolean> => {
+        if (!mediaId) return false;
+        try {
+          const res = await fetch(`https://drive.google.com/thumbnail?id=${mediaId}`, { method: 'GET' });
+          if (res.ok) {
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('image')) return true;
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      };
+
+      const ensureReferenceValid = async (ref: any, name: string) => {
+        if (ref.mediaId) {
+          const valid = await isMediaIdValid(ref.mediaId);
+          if (valid) return { mediaId: ref.mediaId, accountId: ref.accountId };
+        }
+        if (ref.image && ref.image.startsWith('data:image')) {
+          try {
+            const fileRes = await fetch(ref.image);
+            const blob = await fileRes.blob();
+            const file = new File([blob], name, { type: blob.type || 'image/png' });
+            const uploadRes = (await get().uploadImage(file)) as any;
+            if (uploadRes && uploadRes.success) {
+              return {
+                mediaId: uploadRes.media_id || uploadRes.mediaId,
+                accountId: uploadRes.account_id || uploadRes.accountId
+              };
+            }
+          } catch (err) {
+            console.error(`Failed to upload ${name}:`, err);
+          }
+        }
+        return { mediaId: ref.mediaId, accountId: ref.accountId };
+      };
+
+      const ensureInputImageValid = async (ref: any, name: string) => {
+        if (ref.inputMediaId) {
+          const valid = await isMediaIdValid(ref.inputMediaId);
+          if (valid) return { inputMediaId: ref.inputMediaId, inputAccountId: ref.inputAccountId };
+        }
+        if (ref.inputImage && ref.inputImage.startsWith('data:image')) {
+          try {
+            const fileRes = await fetch(ref.inputImage);
+            const blob = await fileRes.blob();
+            const file = new File([blob], name, { type: blob.type || 'image/png' });
+            const uploadRes = (await get().uploadImage(file)) as any;
+            if (uploadRes && uploadRes.success) {
+              return {
+                inputMediaId: uploadRes.media_id || uploadRes.mediaId,
+                inputAccountId: uploadRes.account_id || uploadRes.accountId
+              };
+            }
+          } catch (err) {
+            console.error(`Failed to upload input ${name}:`, err);
+          }
+        }
+        return { inputMediaId: ref.inputMediaId, inputAccountId: ref.inputAccountId };
+      };
+
+      // Characters
+      if (importedProject.characters) {
+        for (const char of importedProject.characters) {
+          if (char.image) {
+            const { mediaId, accountId } = await ensureReferenceValid(char, `char_${char.characterId}.png`);
+            char.mediaId = mediaId;
+            char.accountId = accountId;
+          }
+          if (char.inputImage) {
+            const { inputMediaId, inputAccountId } = await ensureInputImageValid(char, `char_input_${char.characterId}.png`);
+            char.inputMediaId = inputMediaId;
+            char.inputAccountId = inputAccountId;
+          }
+        }
+      }
+
+      // Exteriors
+      if (importedProject.exteriors) {
+        for (const ext of importedProject.exteriors) {
+          if (ext.image) {
+            const { mediaId, accountId } = await ensureReferenceValid(ext, `ext_${ext.exteriorId}.png`);
+            ext.mediaId = mediaId;
+            ext.accountId = accountId;
+          }
+          if (ext.inputImage) {
+            const { inputMediaId, inputAccountId } = await ensureInputImageValid(ext, `ext_input_${ext.exteriorId}.png`);
+            ext.inputMediaId = inputMediaId;
+            ext.inputAccountId = inputAccountId;
+          }
+        }
+      }
+
+      // Props
+      if (importedProject.props) {
+        for (const prop of importedProject.props) {
+          if (prop.image) {
+            const { mediaId, accountId } = await ensureReferenceValid(prop, `prop_${prop.propId}.png`);
+            prop.mediaId = mediaId;
+            prop.accountId = accountId;
+          }
+          if (prop.inputImage) {
+            const { inputMediaId, inputAccountId } = await ensureInputImageValid(prop, `prop_input_${prop.propId}.png`);
+            prop.inputMediaId = inputMediaId;
+            prop.inputAccountId = inputAccountId;
+          }
+        }
+      }
+
+      await saveProject(importedProject);
+      await get().loadHistory();
+      syncChannel?.postMessage({ type: 'project_updated', projectId: newId });
+      
+      if (get().currentProject.id === newId) {
+        set({
+          currentProject: importedProject,
+          characters: importedProject.characters || [],
+          exteriors: importedProject.exteriors || [],
+          props: importedProject.props || [],
+          batchStatus: 'Import dự án thành công!'
+        });
+      }
+    } catch (err: any) {
+      console.error('Import project failed:', err);
+      alert('Import dự án thất bại: ' + err.message);
+    }
+  },
 
   // Character Reference
   characters: [],
@@ -3516,82 +3726,137 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const concurrency = get().imageGenConfig.concurrency || 1;
 
     (async () => {
-      const tasks = [...sttList];
-      let activeIndex = 0;
+      let tasks = [...sttList];
+      let attempt = 1;
+      const maxBatchAttempts = 3;
 
-      const worker = async () => {
-        while (true) {
-          const currentJob = get().batchJobs[jobKey];
-          if (!currentJob || !currentJob.isRunning) {
-            break;
-          }
+      while (tasks.length > 0 && attempt <= maxBatchAttempts) {
+        let activeIndex = 0;
+        const failedTasksThisPass: number[] = [];
 
-          let indexToRun = -1;
+        if (attempt > 1) {
           set((state) => {
             const jobState = state.batchJobs[jobKey];
-            if (!jobState || !jobState.isRunning || activeIndex >= tasks.length) {
-              return {};
-            }
-            indexToRun = activeIndex++;
+            if (!jobState) return {};
             return {
               batchJobs: {
                 ...state.batchJobs,
                 [jobKey]: {
                   ...jobState,
-                  currentIndex: Math.min(activeIndex, tasks.length - 1)
+                  failed: jobState.failed.filter(f => !tasks.includes(Number(f)))
                 }
               }
             };
           });
+        }
 
-          if (indexToRun === -1 || indexToRun >= tasks.length) {
-            break;
+        const worker = async () => {
+          while (true) {
+            const currentJob = get().batchJobs[jobKey];
+            if (!currentJob || !currentJob.isRunning) {
+              break;
+            }
+
+            let indexToRun = -1;
+            set((state) => {
+              const jobState = state.batchJobs[jobKey];
+              if (!jobState || !jobState.isRunning || activeIndex >= tasks.length) {
+                return {};
+              }
+              indexToRun = activeIndex++;
+              return {
+                batchJobs: {
+                  ...state.batchJobs,
+                  [jobKey]: {
+                    ...jobState,
+                    currentIndex: Math.min(activeIndex, tasks.length - 1)
+                  }
+                }
+              };
+            });
+
+            if (indexToRun === -1 || indexToRun >= tasks.length) {
+              break;
+            }
+
+            const stt = tasks[indexToRun];
+            let success = false;
+            let inlineRetries = 2; // inline retry 2 additional times (3 attempts total)
+            let lastError: any = null;
+
+            while (inlineRetries >= 0 && !success) {
+              const innerJob = get().batchJobs[jobKey];
+              if (!innerJob || !innerJob.isRunning) {
+                break;
+              }
+              try {
+                const projData = await getProject(projectId);
+                if (!projData) throw new Error('Project not found in database');
+
+                await get().generateShotImageForProject(projectId, stt, projData);
+                success = true;
+              } catch (err) {
+                lastError = err;
+                inlineRetries--;
+                if (inlineRetries >= 0) {
+                  console.warn(`[Retry] Shot ${stt} failed. Retrying inline (${2 - inlineRetries}/2)...`);
+                  await new Promise(resolve => setTimeout(resolve, 2500));
+                }
+              }
+            }
+
+            if (success) {
+              set((state) => {
+                const jobState = state.batchJobs[jobKey];
+                if (!jobState) return {};
+                return {
+                  batchJobs: {
+                    ...state.batchJobs,
+                    [jobKey]: {
+                      ...jobState,
+                      completed: [...jobState.completed, String(stt)],
+                      failed: jobState.failed.filter(f => f !== String(stt))
+                    }
+                  }
+                };
+              });
+            } else {
+              console.error(`Failed to generate shot ${stt} for project ${projectId} on pass ${attempt}:`, lastError);
+              failedTasksThisPass.push(stt);
+              set((state) => {
+                const jobState = state.batchJobs[jobKey];
+                if (!jobState) return {};
+                const failedList = jobState.failed.includes(String(stt)) ? jobState.failed : [...jobState.failed, String(stt)];
+                return {
+                  batchJobs: {
+                    ...state.batchJobs,
+                    [jobKey]: {
+                      ...jobState,
+                      failed: failedList
+                    }
+                  }
+                };
+              });
+            }
           }
+        };
 
-          const stt = tasks[indexToRun];
-          try {
-            const projData = await getProject(projectId);
-            if (!projData) throw new Error('Project not found in database');
+        const workers = Array(Math.min(concurrency, tasks.length))
+          .fill(null)
+          .map(() => worker());
 
-            await get().generateShotImageForProject(projectId, stt, projData);
+        await Promise.all(workers);
 
-            set((state) => {
-              const jobState = state.batchJobs[jobKey];
-              if (!jobState) return {};
-              return {
-                batchJobs: {
-                  ...state.batchJobs,
-                  [jobKey]: {
-                    ...jobState,
-                    completed: [...jobState.completed, String(stt)]
-                  }
-                }
-              };
-            });
-          } catch (err) {
-            console.error(`Failed to generate shot ${stt} for project ${projectId}:`, err);
-            set((state) => {
-              const jobState = state.batchJobs[jobKey];
-              if (!jobState) return {};
-              return {
-                batchJobs: {
-                  ...state.batchJobs,
-                  [jobKey]: {
-                    ...jobState,
-                    failed: [...jobState.failed, String(stt)]
-                  }
-                }
-              };
-            });
+        // Update list for next attempt
+        tasks = [...failedTasksThisPass];
+        if (tasks.length > 0) {
+          attempt++;
+          if (attempt <= maxBatchAttempts) {
+            console.log(`[Batch Retry] Starting pass ${attempt} for failed shots: ${tasks.join(', ')}`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
           }
         }
-      };
-
-      const workers = Array(Math.min(concurrency, tasks.length))
-        .fill(null)
-        .map(() => worker());
-
-      await Promise.all(workers);
+      }
 
       set((state) => {
         const jobState = state.batchJobs[jobKey];
@@ -4112,8 +4377,61 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         throw new Error('Chưa có ảnh phân cảnh. Vui lòng vẽ ảnh phân cảnh trước khi tạo video!');
       }
 
-      const refMediaId = row.mediaId || '';
-      const refAccountId = row.accountId || '';
+      let refMediaId = row.mediaId || '';
+      let refAccountId = row.accountId || '';
+
+      const isMediaIdValid = async (mediaId: string): Promise<boolean> => {
+        if (!mediaId) return false;
+        try {
+          const res = await fetch(`https://drive.google.com/thumbnail?id=${mediaId}`, { method: 'GET' });
+          if (res.ok) {
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType.includes('image')) return true;
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      };
+
+      if (refMediaId) {
+        const valid = await isMediaIdValid(refMediaId);
+        if (!valid) {
+          console.warn(`Shot ${stt} mediaId ${refMediaId} is invalid or expired. Attempting to re-upload image...`);
+          refMediaId = '';
+        }
+      }
+
+      if (!refMediaId && row.imageUrl) {
+        try {
+          const fileRes = await fetch(row.imageUrl);
+          const blob = await fileRes.blob();
+          const file = new File([blob], `shot_${stt}.png`, { type: blob.type || 'image/png' });
+          const uploadRes = (await get().uploadImage(file)) as any;
+          if (uploadRes && uploadRes.success) {
+            refMediaId = uploadRes.media_id || uploadRes.mediaId;
+            refAccountId = uploadRes.account_id || uploadRes.accountId;
+            
+            await runInProjectDbQueue(async () => {
+              const latestProj = await getProject(projectId);
+              if (latestProj) {
+                latestProj.imagePrompts = latestProj.imagePrompts.map((p: any) => {
+                  if (p.stt === stt) {
+                    return { ...p, mediaId: refMediaId, accountId: refAccountId };
+                  }
+                  return p;
+                });
+                await saveProject(latestProj);
+                if (get().currentProject.id === projectId) {
+                  set({ currentProject: latestProj });
+                }
+              }
+            });
+          }
+        } catch (uploadErr) {
+          console.error(`Failed to auto re-upload shot image for video generation:`, uploadErr);
+        }
+      }
 
       const payload: any = {
         projectId,
