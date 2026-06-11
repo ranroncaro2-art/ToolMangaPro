@@ -12,7 +12,7 @@ import ShotsManager from '../components/ShotsManager';
 import VideoManager from '../components/VideoManager';
 import CinemaManager from '../components/CinemaManager';
 import GlobalQueueMonitor from '../components/GlobalQueueMonitor';
-import { UploadCloud, Table, Sparkles, FolderOpen, Sliders, Film, Play, Tv, Loader2 } from 'lucide-react';
+import { UploadCloud, Table, Sparkles, FolderOpen, Sliders, Film, Play, Tv, Loader2, RefreshCw } from 'lucide-react';
 import { useProjectStore } from '../store/useProjectStore';
 import LoginScreen from '../components/LoginScreen';
 
@@ -25,6 +25,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'upload' | 'mapping' | 'prompts' | 'shots' | 'references' | 'video' | 'cinema' | 'templates'>('upload');
   const { initializeStore, currentProject, loadHistory, loadProject } = useProjectStore();
+
+  // Refresh state
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   // Authentication states
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -69,6 +72,19 @@ export default function Home() {
     initializeStore();
   }, []);
 
+  const handleRefresh = async () => {
+    if (!currentProject?.id || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await loadProject(currentProject.id);
+      await loadHistory();
+    } catch (err) {
+      console.error("Failed to refresh project:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Sync when window gains focus
   useEffect(() => {
     const handleFocus = async () => {
@@ -87,6 +103,20 @@ export default function Home() {
       window.removeEventListener('focus', handleFocus);
     };
   }, [currentProject?.id, loadHistory, loadProject]);
+
+  // Handle keyboard shortcut F5 to trigger local refresh instead of app reload
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRefresh();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [currentProject?.id, isRefreshing]);
 
 
   const isUploadCompleted = !!currentProject.srtContent;
@@ -293,7 +323,18 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex items-center shrink-0 pr-2">
+            <div className="flex items-center gap-2 shrink-0 pr-2">
+              {currentProject?.id && (
+                <button
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/60 hover:bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-350 hover:text-slate-100 hover:border-slate-700 transition cursor-pointer disabled:opacity-40 select-none shadow-sm"
+                  title="Làm mới dữ liệu từ cơ sở dữ liệu (F5)"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-violet-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">Làm mới (F5)</span>
+                </button>
+              )}
               {/* GlobalQueueMonitor is rendered globally as a floating button at page root */}
             </div>
           </div>
