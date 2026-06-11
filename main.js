@@ -25,12 +25,19 @@ function startNextServer() {
   const command = isDev ? 'dev' : 'start';
   console.log(`[Electron Launcher] Launching Next.js server in "${command}" mode on port ${PORT}...`);
 
-  // Wrap path in quotes to handle spaces in folder paths on Windows (e.g. "Tool Manga Pro")
-  const nextBinQuoted = `"${nextBin}"`;
-  nextProcess = spawn('node', [nextBinQuoted, command, '-p', PORT.toString()], {
+  // Use bundled node.exe when packaged to avoid dependency on global node.js
+  const nodeExe = app.isPackaged
+    ? path.join(process.resourcesPath, 'bin', 'node.exe')
+    : 'node';
+
+  nextProcess = spawn(nodeExe, [nextBin, command, '-p', PORT.toString()], {
     cwd: appPath,
-    env: { ...process.env, NODE_ENV: isDev ? 'development' : 'production' },
-    shell: true
+    env: { 
+      ...process.env, 
+      NODE_ENV: isDev ? 'development' : 'production',
+      ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
+    },
+    shell: false
   });
 
   nextProcess.stdout.on('data', (data) => {

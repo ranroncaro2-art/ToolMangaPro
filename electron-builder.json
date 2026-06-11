@@ -27,5 +27,11 @@
     "!temp_payload_*",
     "!export_progress_*"
   ],
-  "asar": false
+  "asar": false,
+  "extraResources": [
+    {
+      "from": "resources/bin",
+      "to": "bin"
+    }
+  ]
 }

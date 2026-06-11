@@ -378,17 +378,27 @@ export async function POST(req: Request) {
     console.log('[Export Video API] Writing temp payload file:', tempPayloadPath);
     fs.writeFileSync(tempPayloadPath, JSON.stringify(compilerPayload, null, 2), 'utf-8');
 
-    let pythonExe = 'c:\\PHAN MEM\\tool-manga\\backend\\.venv\\Scripts\\python.exe';
-    if (!fs.existsSync(pythonExe)) {
-      pythonExe = 'C:\\Users\\ADMIN\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
-    }
-    if (!fs.existsSync(pythonExe)) {
-      pythonExe = 'python';
-    }
-    console.log('[Export Video API] Selected Python executable:', pythonExe);
+    const isPackaged = process.env.ELECTRON_PACKAGED === 'true';
+    let execCmd = '';
+    let args: string[] = [];
 
-    const scriptPath = path.join(process.cwd(), 'src/lib/videoCompiler.py');
-    console.log('[Export Video API] Script path:', scriptPath);
+    if (isPackaged) {
+      execCmd = path.join(process.cwd(), '..', 'bin', 'videoCompiler.exe');
+      args = [tempPayloadPath];
+      console.log('[Export Video API] Running in packaged mode. Executable path:', execCmd);
+    } else {
+      let pythonExe = 'c:\\PHAN MEM\\tool-manga\\backend\\.venv\\Scripts\\python.exe';
+      if (!fs.existsSync(pythonExe)) {
+        pythonExe = 'C:\\Users\\ADMIN\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
+      }
+      if (!fs.existsSync(pythonExe)) {
+        pythonExe = 'python';
+      }
+      execCmd = pythonExe;
+      const scriptPath = path.join(process.cwd(), 'src/lib/videoCompiler.py');
+      args = ['-u', scriptPath, tempPayloadPath];
+      console.log('[Export Video API] Running in development mode. Python path:', execCmd, 'Script:', scriptPath);
+    }
 
     // Prepare initial progress state
     const progress = {
@@ -414,8 +424,8 @@ export async function POST(req: Request) {
 
     saveProgress();
 
-    console.log('[Export Video API] Spawning background Python child process...');
-    const child = spawn(pythonExe, ['-u', scriptPath, tempPayloadPath]);
+    console.log('[Export Video API] Spawning background compiler process...');
+    const child = spawn(execCmd, args);
 
     const exportEntry = {
       child,

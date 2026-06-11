@@ -102,17 +102,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           localStorage.removeItem('login_saved_username');
         }
 
+        const isValidAbsoluteUrl = (url: any): boolean => {
+          if (!url) return false;
+          const cleaned = String(url).trim().toLowerCase();
+          if (cleaned === '' || cleaned === 'undefined' || cleaned === 'null' || cleaned === '/') return false;
+          return cleaned.startsWith('http://') || cleaned.startsWith('https://');
+        };
+
         // Save session credentials
         localStorage.setItem('login_session_active', 'true');
         localStorage.setItem('login_session_user', username);
         localStorage.setItem('login_session_mac', macAddress);
-        if (result.deploy_link) {
+        if (result.deploy_link && isValidAbsoluteUrl(result.deploy_link)) {
           localStorage.setItem('login_deploy_link', result.deploy_link);
+        } else {
+          localStorage.removeItem('login_deploy_link');
         }
 
         // Delay slightly for transition animation
         setTimeout(() => {
-          onLoginSuccess(result.deploy_link || '');
+          onLoginSuccess(result.deploy_link && isValidAbsoluteUrl(result.deploy_link) ? result.deploy_link : '');
         }, 1200);
       } else {
         setErrorMsg(result.message || 'Sai thông tin tài khoản hoặc thiết bị chưa được cấp quyền.');

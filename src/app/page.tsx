@@ -31,6 +31,13 @@ export default function Home() {
   const [deployRedirectUrl, setDeployRedirectUrl] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState<boolean>(true);
 
+  const isValidAbsoluteUrl = (url: string | null | undefined): boolean => {
+    if (!url) return false;
+    const cleaned = url.trim().toLowerCase();
+    if (cleaned === '' || cleaned === 'undefined' || cleaned === 'null' || cleaned === '/') return false;
+    return cleaned.startsWith('http://') || cleaned.startsWith('https://');
+  };
+
   // Check login session on mount
   useEffect(() => {
     const sessionActive = localStorage.getItem('login_session_active') === 'true';
@@ -38,8 +45,11 @@ export default function Home() {
 
     if (sessionActive) {
       setIsAuthenticated(true);
-      if (savedRedirect) {
+      if (savedRedirect && isValidAbsoluteUrl(savedRedirect)) {
         setDeployRedirectUrl(savedRedirect);
+      } else {
+        localStorage.removeItem('login_deploy_link');
+        setDeployRedirectUrl(null);
       }
     }
     setCheckingAuth(false);
@@ -47,7 +57,7 @@ export default function Home() {
 
   // Handle automatic redirection when authenticated & redirect link is set
   useEffect(() => {
-    if (isAuthenticated && deployRedirectUrl) {
+    if (isAuthenticated && deployRedirectUrl && isValidAbsoluteUrl(deployRedirectUrl)) {
       const timer = setTimeout(() => {
         window.location.href = deployRedirectUrl;
       }, 500);
@@ -137,8 +147,10 @@ export default function Home() {
       <LoginScreen
         onLoginSuccess={(link) => {
           setIsAuthenticated(true);
-          if (link) {
+          if (link && isValidAbsoluteUrl(link)) {
             setDeployRedirectUrl(link);
+          } else {
+            setDeployRedirectUrl(null);
           }
         }}
       />
