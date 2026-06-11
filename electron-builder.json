@@ -1,0 +1,31 @@
+{
+  "appId": "com.storyboard.mangatool",
+  "productName": "TOOL MANGA ANIME PRO",
+  "directories": {
+    "output": "dist"
+  },
+  "win": {
+    "target": [
+      "nsis",
+      "portable"
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "TOOL MANGA ANIME PRO"
+  },
+  "files": [
+    "**/*",
+    "!.next/cache/**/*",
+    "!dist/**/*",
+    "!.git/**/*",
+    "!.github/**/*",
+    "!temp_compile_assets/**/*",
+    "!temp_payload_*",
+    "!export_progress_*"
+  ],
+  "asar": false
+}
