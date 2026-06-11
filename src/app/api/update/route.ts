@@ -18,7 +18,7 @@ export async function POST(req: Request) {
       'Accept': 'application/vnd.github+json',
     };
     if (token && token.trim() !== '') {
-      headers['Authorization'] = `token ${token.trim()}`;
+      headers['Authorization'] = `Bearer ${token.trim()}`;
     }
 
     console.log(`[Updater] Downloading update from branch: ${branch}...`);

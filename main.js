@@ -30,15 +30,29 @@ function startNextServer() {
     ? path.join(process.resourcesPath, 'bin', 'node.exe')
     : 'node';
 
-  nextProcess = spawn(nodeExe, [nextBin, command, '-p', PORT.toString()], {
-    cwd: appPath,
-    env: { 
-      ...process.env, 
-      NODE_ENV: isDev ? 'development' : 'production',
-      ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
-    },
-    shell: false
-  });
+  if (process.platform === 'win32') {
+    const cmdString = `"${nodeExe}" "${nextBin}" ${command} -p ${PORT}`;
+    console.log(`[Electron Launcher] Spawning Next.js server via command string: ${cmdString}`);
+    nextProcess = spawn(cmdString, [], {
+      cwd: appPath,
+      env: { 
+        ...process.env, 
+        NODE_ENV: isDev ? 'development' : 'production',
+        ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
+      },
+      shell: true
+    });
+  } else {
+    nextProcess = spawn(nodeExe, [nextBin, command, '-p', PORT.toString()], {
+      cwd: appPath,
+      env: { 
+        ...process.env, 
+        NODE_ENV: isDev ? 'development' : 'production',
+        ELECTRON_PACKAGED: app.isPackaged ? 'true' : 'false'
+      },
+      shell: false
+    });
+  }
 
   nextProcess.stdout.on('data', (data) => {
     console.log(`[Next.js Server]: ${data.toString().trim()}`);
@@ -192,7 +206,7 @@ ipcMain.handle('trigger-app-update', async (event, { token, version }) => {
       'User-Agent': 'ToolMangaPro-Updater'
     };
     if (token && token.trim() !== '') {
-      headers['Authorization'] = `token ${token.trim()}`;
+      headers['Authorization'] = `Bearer ${token.trim()}`;
     }
     
     console.log(`[Updater] Fetching release metadata for version: v${version}...`);
@@ -225,7 +239,7 @@ ipcMain.handle('trigger-app-update', async (event, { token, version }) => {
       'User-Agent': 'ToolMangaPro-Updater'
     };
     if (token && token.trim() !== '') {
-      downloadHeaders['Authorization'] = `token ${token.trim()}`;
+      downloadHeaders['Authorization'] = `Bearer ${token.trim()}`;
     }
     
     const downloadRes = await fetch(asset.url, { headers: downloadHeaders });

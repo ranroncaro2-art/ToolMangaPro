@@ -38,7 +38,7 @@ export default function Header() {
         'Accept': 'application/vnd.github+json',
       };
       if (githubToken.trim()) {
-        headers['Authorization'] = `token ${githubToken.trim()}`;
+        headers['Authorization'] = `Bearer ${githubToken.trim()}`;
       }
 
       // Fetch package.json content
