@@ -73,3 +73,75 @@ export function parseSRT(srtContent: string): SRTParseResult {
     duration
   };
 }
+
+export function extractCoreText(line: string): string {
+  // 1. Check if there is a colon (half-width or full-width) separating character name
+  const colonIndex = line.indexOf(':') !== -1 ? line.indexOf(':') : line.indexOf('：');
+  let dialogue = line;
+  if (colonIndex !== -1) {
+    dialogue = line.substring(colonIndex + 1);
+  }
+  
+  // 2. Remove nuance blocks in curly braces (both half-width and full-width)
+  dialogue = dialogue
+    .replace(/\{[^{}]*\}/g, '')
+    .replace(/｛[^｛｝]*｝/g, '');
+    
+  // 3. Strip brackets and quotes (Japanese and English)
+  dialogue = dialogue.replace(/^[「『（\("'\s\[［]+|[」』）\)"'\s\]］]+$/g, '');
+  
+  // 4. Remove all whitespace and common punctuation for clean comparison
+  return dialogue
+    .replace(/[\s\r\n\t]/g, '')
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()\"'「」『』（）｛｝\[\]［］。、？！\?\!]/g, '')
+    .toLowerCase();
+}
+
+export function computeOverlap(str1: string, str2: string): number {
+  const set1 = new Set(str1.split(''));
+  const set2 = new Set(str2.split(''));
+  let intersection = 0;
+  for (const char of set1) {
+    if (set2.has(char)) {
+      intersection++;
+    }
+  }
+  const minLen = Math.min(str1.length, str2.length);
+  if (minLen === 0) return 0;
+  return intersection / minLen;
+}
+
+export function matchScriptWithSrt(scriptContent: string, srtContent: string): string {
+  const parseResult = parseSRT(srtContent);
+  const blocks = parseResult.blocks;
+  if (blocks.length === 0) return srtContent;
+
+  const scriptLines = scriptContent
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+
+  if (scriptLines.length !== blocks.length) {
+    throw new Error(`Số dòng kịch bản (${scriptLines.length}) khác số phân cảnh phụ đề (${blocks.length})`);
+  }
+
+  const updatedBlocks = blocks.map((block, i) => {
+    const matchedLine = scriptLines[i];
+    // Remove nuance blocks in curly braces (both half-width and full-width)
+    const cleanedLine = matchedLine
+      .replace(/\{[^{}]*\}/g, '')
+      .replace(/｛[^｛｝]*｝/g, '')
+      .replace(/ +/g, ' ')
+      .trim();
+    return {
+      ...block,
+      text: cleanedLine
+    };
+  });
+
+  // Re-serialize the blocks back to SRT string format
+  return updatedBlocks.map((block) => {
+    return `${block.id}\n${block.timeRange}\n${block.text}`;
+  }).join('\n\n');
+}
+

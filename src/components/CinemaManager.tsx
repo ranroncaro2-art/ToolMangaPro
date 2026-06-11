@@ -70,10 +70,71 @@ function getSubtitlesForScene(subtitleRange: string, blocks: SubtitleBlock[]): S
   return [];
 }
 
-// Proportional duration splitter for long subtitle blocks
+// Proportional duration splitter for long subtitle blocks (supporting both CJK and non-CJK)
 function splitLongSubtitleBlock(block: SubtitleBlock, maxWords: number = 7): SubtitleBlock[] {
-  const words = block.text.replace(/\s+/g, ' ').trim().split(' ');
-  if (words.length <= maxWords || maxWords <= 0) {
+  const text = block.text.trim();
+  const isCjk = /[\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u4e00-\u9faf\u3400-\u4dbf]/.test(text);
+
+  let chunkTexts: string[] = [];
+
+  if (isCjk) {
+    const limit = Math.max(10, maxWords * 3); // Scale CJK limit (e.g. 7 * 3 = 21 chars)
+    const puncs = /[、。！？，．？！]/;
+    const parts: string[] = [];
+    let current = '';
+    
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      current += char;
+      if (puncs.test(char) || char === ' ' || char === '　') {
+        // Look ahead to check if the next character is a closing bracket/quote
+        while (i + 1 < text.length && /[」』）\)"'\]］]/.test(text[i + 1])) {
+          i++;
+          current += text[i];
+        }
+        
+        if (current.length >= 10 || i === text.length - 1) {
+          parts.push(current.trim());
+          current = '';
+        }
+      }
+    }
+    if (current.trim()) {
+      parts.push(current.trim());
+    }
+    
+    for (const p of parts) {
+      if (p.length <= limit) {
+        chunkTexts.push(p);
+      } else {
+        let temp = p;
+        while (temp.length > limit) {
+          chunkTexts.push(temp.substring(0, limit));
+          temp = temp.substring(limit);
+        }
+        if (temp) {
+          if (chunkTexts.length > 0 && temp.length <= 3) {
+            chunkTexts[chunkTexts.length - 1] += temp;
+          } else {
+            chunkTexts.push(temp);
+          }
+        }
+      }
+    }
+  } else {
+    // Non-CJK text (space-separated)
+    const words = text.replace(/\s+/g, ' ').split(' ');
+    if (words.length <= maxWords || maxWords <= 0) {
+      return [block];
+    }
+    const chunks: string[][] = [];
+    for (let i = 0; i < words.length; i += maxWords) {
+      chunks.push(words.slice(i, i + maxWords));
+    }
+    chunkTexts = chunks.map(c => c.join(' '));
+  }
+
+  if (chunkTexts.length <= 1) {
     return [block];
   }
 
@@ -81,13 +142,6 @@ function splitLongSubtitleBlock(block: SubtitleBlock, maxWords: number = 7): Sub
   const startSec = parseTimestampToSeconds(block.startTime);
   const endSec = parseTimestampToSeconds(block.endTime);
   const totalDuration = endSec - startSec;
-
-  const chunks: string[][] = [];
-  for (let i = 0; i < words.length; i += maxWords) {
-    chunks.push(words.slice(i, i + maxWords));
-  }
-
-  const chunkTexts = chunks.map(c => c.join(' '));
   const totalChars = chunkTexts.reduce((sum, t) => sum + t.length, 0);
 
   // Helper to format seconds back to SRT format timestamp: HH:MM:SS,mmm
@@ -101,8 +155,8 @@ function splitLongSubtitleBlock(block: SubtitleBlock, maxWords: number = 7): Sub
 
   let currentStart = startSec;
   for (let i = 0; i < chunkTexts.length; i++) {
-    const text = chunkTexts[i];
-    const chunkDuration = totalDuration * (text.length / (totalChars || 1));
+    const t = chunkTexts[i];
+    const chunkDuration = totalDuration * (t.length / (totalChars || 1));
     const currentEnd = currentStart + chunkDuration;
 
     result.push({
@@ -110,7 +164,7 @@ function splitLongSubtitleBlock(block: SubtitleBlock, maxWords: number = 7): Sub
       timeRange: `${formatSecondsToSRTTime(currentStart)} --> ${formatSecondsToSRTTime(currentEnd)}`,
       startTime: formatSecondsToSRTTime(currentStart),
       endTime: formatSecondsToSRTTime(currentEnd),
-      text: text
+      text: t
     });
 
     currentStart = currentEnd;
@@ -569,7 +623,7 @@ export default function CinemaManager() {
           projectName: currentProject.name,
           sceneMapping: currentProject.sceneMapping,
           imagePrompts: currentProject.imagePrompts,
-          srtContent: currentProject.srtContent,
+          srtContent: srtBlocks.map(b => `${b.id}\n${b.startTime} --> ${b.endTime}\n${b.text}`).join('\n\n'),
           videoSaveDir: currentProject.videoSaveDir,
           videoType: typeToValidate,
           bgmVolumeDb: currentProject.bgmVolumeDb ?? -18,
@@ -948,7 +1002,7 @@ export default function CinemaManager() {
           projectName: currentProject.name,
           sceneMapping: currentProject.sceneMapping,
           imagePrompts: currentProject.imagePrompts,
-          srtContent: currentProject.srtContent,
+          srtContent: srtBlocks.map(b => `${b.id}\n${b.startTime} --> ${b.endTime}\n${b.text}`).join('\n\n'),
           style: {
             fontSize,
             fontFamily,

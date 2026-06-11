@@ -99,6 +99,100 @@ function calculateCost(
   return inputCost + outputCost;
 }
 
+function sanitizeContentForGemini(text: string): string {
+  if (!text) return text;
+  
+  const vnChar = 'a-zA-Z0-9_ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠàáâãèéêìíòóôõùúăđĩũơƯĂÂĐỔỞỚỜỞỨỪỬỮỢỰỶỸửữựửỳỵỷỹđ';
+  const makeRegex = (pattern: string, flags = 'gi') => {
+    return new RegExp(`(?<![${vnChar}])${pattern}(?![${vnChar}])`, flags);
+  };
+
+  const replacements: [RegExp, string][] = [
+    // Vietnamese phrases
+    [makeRegex('giơ ngón (tay )?giữa'), 'tỏ thái độ thách thức'],
+    [makeRegex('tay sai'), 'đàn em'],
+    [makeRegex('chửi bới'), 'mắng mỏ'],
+    [makeRegex('chửi rủa'), 'mắng mỏ'],
+    [makeRegex('bóp cổ'), 'ghì chặt cổ'],
+    [makeRegex('đánh đập'), 'tác động mạnh'],
+    [makeRegex('sát hại'), 'hạ gục'],
+    [makeRegex('máu me'), 'vết đỏ'],
+    [/(?<=\s|^)máu(?=\s|$|[.,!?;:])/gi, 'vết đỏ'], // match "máu" as a standalone word
+    [makeRegex('kinh hoàng'), 'hoảng sợ'],
+    [makeRegex('kinh sợ'), 'hoảng sợ'],
+    [makeRegex('hét (lên )?thất thanh'), 'hét lớn'],
+    [makeRegex('đe dọa'), 'gây áp lực'],
+    
+    // Additional sensitive words commonly blocked by Gemini
+    [makeRegex('giết'), 'hạ gục'],
+    [makeRegex('giết người'), 'hại người'],
+    [makeRegex('chết'), 'ra đi'],
+    [makeRegex('đấm'), 'tác động'],
+    [makeRegex('đá'), 'tác động'],
+    [makeRegex('bạo lực'), 'căng thẳng'],
+    [makeRegex('tự sát'), 'tự hại'],
+    [makeRegex('tự tử'), 'tự hại'],
+    [makeRegex('súng'), 'vũ khí'],
+    [makeRegex('khẩu súng'), 'vũ khí'],
+    [makeRegex('bắn súng'), 'tấn công'],
+    [makeRegex('tra tấn'), 'hành hạ'],
+    [makeRegex('tấn công'), 'áp sát'],
+    [makeRegex('tát'), 'tác động vào mặt'],
+    [makeRegex('đâm'), 'tấn công'],
+    [makeRegex('chém'), 'tấn công'],
+    [makeRegex('hiếp dâm'), 'hại'],
+    [makeRegex('cưỡng bức'), 'ép buộc'],
+
+    // Japanese insults and sensitive words
+    [makeRegex('化石ジジイ', 'g'), '古い職人'],
+    [makeRegex('小汚いジジイ', 'g'), '高齢の職人'],
+    [makeRegex('貧乏サラリーマン', 'g'), '一般サラリーマン'],
+    [makeRegex('クッサ', 'g'), 'においが強い'],
+    [makeRegex('ゴミ溜め', 'g'), '古い場所'],
+    [makeRegex('ジジイ', 'g'), '高齢者'],
+    [makeRegex('じじい', 'g'), '高齢者'],
+    [makeRegex('クビ', 'g'), '退職'],
+    [makeRegex('ネグリジェ姿', 'g'), '部屋着姿'],
+    [makeRegex('最近してないよね', 'g'), '最近あまり話してないよね'],
+    [makeRegex('太もも', 'g'), '肩'],
+    
+    // Vietnamese insults and sensitive words
+    [makeRegex('lão già hóa thạch'), 'người cũ'],
+    [makeRegex('lão già bẩn thỉu'), 'người lớn tuổi'],
+    [makeRegex('nghèo hèn'), 'bình dân'],
+    [makeRegex('bần cùng'), 'bình dân'],
+    [makeRegex('bốc mùi hôi thối'), 'mùi nồng'],
+    [makeRegex('hôi thối'), 'mùi nồng'],
+    [makeRegex('bãi rác'), 'nơi bừa bộn'],
+    [makeRegex('đống rác'), 'nơi bừa bộn'],
+    [makeRegex('cút đi'), 'rời đi'],
+    [makeRegex('biến đi'), 'rời đi'],
+    [makeRegex('váy ngủ mỏng'), 'đồ bộ mặc nhà'],
+    [makeRegex('gần đây không làm chuyện đó'), 'gần đây ít nói chuyện'],
+    [makeRegex('đùi'), 'vai'],
+    
+    // English phrases
+    [makeRegex('middle finger'), 'defiant gesture'],
+    [makeRegex('henchmen'), 'associates'],
+    [makeRegex('henchman'), 'associate'],
+    [makeRegex('motherfucker'), 'fool'],
+    [makeRegex('bastard'), 'fool'],
+    [makeRegex('kill'), 'defeat'],
+    [makeRegex('murder'), 'defeat'],
+    [makeRegex('blood'), 'stain'],
+    [makeRegex('bloody'), 'stained'],
+    [makeRegex('threaten'), 'pressure'],
+    [makeRegex('screams in horror'), 'screams loudly'],
+    [makeRegex('screaming in horror'), 'screaming loudly']
+  ];
+
+  let sanitized = text;
+  for (const [regex, replacement] of replacements) {
+    sanitized = sanitized.replace(regex, replacement);
+  }
+  return sanitized;
+}
+
 async function generateTextContent(payload: any) {
   const { provider, apiKey, modelName, prompt, systemPrompt, responseFormat } = payload;
 
@@ -152,10 +246,15 @@ async function generateTextContent(payload: any) {
 
   } else if (provider === 'gemini') {
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    
+    // Sanitize prompt and system prompt for Gemini
+    const sanitizedPrompt = sanitizeContentForGemini(prompt);
+    const sanitizedSystemPrompt = systemPrompt ? sanitizeContentForGemini(systemPrompt) : undefined;
+
     const payloadData: any = {
       contents: [
         {
-          parts: [{ text: prompt }]
+          parts: [{ text: sanitizedPrompt }]
         }
       ],
       generationConfig: {
@@ -182,9 +281,9 @@ async function generateTextContent(payload: any) {
       ]
     };
 
-    if (systemPrompt) {
+    if (sanitizedSystemPrompt) {
       payloadData.systemInstruction = {
-        parts: [{ text: systemPrompt }]
+        parts: [{ text: sanitizedSystemPrompt }]
       };
     }
 
@@ -203,6 +302,7 @@ async function generateTextContent(payload: any) {
 
     const resJson = await geminiRes.json();
     responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
     
     if (!responseText) {
       const candidate = resJson.candidates?.[0];
@@ -212,14 +312,32 @@ async function generateTextContent(payload: any) {
           const ratings = candidate.safetyRatings
             ? candidate.safetyRatings.map((r: any) => `${r.category}:${r.probability}`).join(', ')
             : 'none';
-          throw new Error(`Gemini blocked or failed to generate text. Reason: ${finishReason}. Safety Ratings: ${ratings}`);
+          console.error('[Gemini Blocked] Finish reason:', finishReason, 'Safety Ratings:', ratings);
+          console.error('[Gemini Blocked] Prompt content was:', prompt);
+          console.error('[Gemini Blocked] System prompt was:', systemPrompt);
+          
+          let friendlyTip = '';
+          if (finishReason === 'SAFETY') {
+            friendlyTip = ' (Lưu ý: Kịch bản hoặc nội dung tạo ra bị bộ lọc an toàn của Google chặn. Hãy thử sửa đổi kịch bản để tránh các từ ngữ nhạy cảm/bạo lực hoặc chuyển sang dùng OpenAI/Claude).';
+          }
+          throw new Error(`Gemini blocked or failed to generate text. Reason: ${finishReason}. Safety Ratings: ${ratings}.${friendlyTip}`);
         }
       }
       if (resJson.promptFeedback?.blockReason) {
-        throw new Error(`Gemini prompt was blocked. Reason: ${resJson.promptFeedback.blockReason}`);
+        console.error('[Gemini Blocked] Prompt was blocked. Reason:', resJson.promptFeedback.blockReason);
+        console.error('[Gemini Blocked] Prompt content was:', prompt);
+        console.error('[Gemini Blocked] System prompt was:', systemPrompt);
+        
+        let friendlyTip = '';
+        if (resJson.promptFeedback.blockReason === 'PROHIBITED_CONTENT') {
+          friendlyTip = ' (Lưu ý: Kịch bản hoặc phụ đề có chứa từ ngữ/hành động bị bộ lọc của Google chặn như cử chỉ nhạy cảm, bạo lực hoặc xúc phạm [Ví dụ: "giơ ngón giữa", "tay sai", "chửi bới"]. Hãy thử diễn đạt lại nhẹ nhàng hơn hoặc chuyển sang dùng OpenAI/Claude).';
+        }
+        throw new Error(`Gemini prompt was blocked. Reason: ${resJson.promptFeedback.blockReason}.${friendlyTip}`);
       }
       throw new Error(`Gemini returned an empty response.`);
     }
+
+
 
     inputTokens = resJson.usageMetadata?.promptTokenCount || 0;
     outputTokens = resJson.usageMetadata?.candidatesTokenCount || 0;

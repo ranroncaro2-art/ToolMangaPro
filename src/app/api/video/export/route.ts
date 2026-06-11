@@ -32,11 +32,17 @@ function getSubtitlesForScene(subtitleRange: string, blocks: any[]): any[] {
   const parts = subtitleRange.split('-').map(x => parseInt(x.trim(), 10));
   if (parts.length === 1 && !isNaN(parts[0])) {
     const id = parts[0];
-    return blocks.filter(b => b.id === id);
+    return blocks.filter(b => {
+      const origId = b.id >= 1000 ? Math.floor(b.id / 1000) : b.id;
+      return origId === id;
+    });
   } else if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
     const start = parts[0];
     const end = parts[1];
-    return blocks.filter(b => b.id >= start && b.id <= end);
+    return blocks.filter(b => {
+      const origId = b.id >= 1000 ? Math.floor(b.id / 1000) : b.id;
+      return origId >= start && origId <= end;
+    });
   }
   return [];
 }
@@ -243,7 +249,14 @@ export async function POST(req: Request) {
     // Scan & Validate Assets
     console.log('[Export Video API] Scanning and validating assets...');
     const validationErrors: string[] = [];
-    const expectedVoiceCount = srtBlocks.length;
+    // Count unique original IDs from split SRT blocks to match the number of voice files
+    const uniqueOrigIds = new Set(
+      srtBlocks.map(s => {
+        const id = typeof s.id === 'number' ? s.id : parseInt(s.id, 10);
+        return id >= 1000 ? Math.floor(id / 1000) : id;
+      })
+    );
+    const expectedVoiceCount = uniqueOrigIds.size;
     const voiceCheck = checkVoiceFiles(resolvedSaveDir);
     console.log('[Export Video API] Voice files check:', voiceCheck.found, 'found, expected:', expectedVoiceCount);
     if (voiceCheck.found < expectedVoiceCount) {

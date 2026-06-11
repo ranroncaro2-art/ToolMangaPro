@@ -1,6 +1,119 @@
 import { AIProvider, AIConfig, AIResponse } from './types';
 import { SceneMappingRow, ImagePromptRow } from '../db';
 
+// Helper to repair truncated or malformed JSON
+export function repairJson(jsonStr: string): string {
+  let s = jsonStr.trim();
+  
+  const stack: ('{' | '[')[] = [];
+  let inString = false;
+  let isEscaped = false;
+  let i = 0;
+  
+  while (i < s.length) {
+    const char = s[i];
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === '\\') {
+        isEscaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      } else if (char === '{') {
+        stack.push('{');
+      } else if (char === '}') {
+        if (stack[stack.length - 1] === '{') {
+          stack.pop();
+        }
+      } else if (char === '[') {
+        stack.push('[');
+      } else if (char === ']') {
+        if (stack[stack.length - 1] === '[') {
+          stack.pop();
+        }
+      }
+    }
+    i++;
+  }
+  
+  let repaired = s;
+  
+  if (inString) {
+    if (isEscaped) {
+      repaired = repaired.slice(0, -1);
+    }
+    const match = repaired.match(/\\u[0-9a-fA-F]{0,3}$/);
+    if (match) {
+      repaired = repaired.slice(0, -match[0].length);
+    }
+    repaired += '"';
+    inString = false;
+  }
+  
+  let temp = repaired;
+  
+  while (true) {
+    const trimmed = temp.trim();
+    if (trimmed.endsWith(':')) {
+      temp = trimmed.slice(0, -1);
+      continue;
+    }
+    if (trimmed.endsWith(',')) {
+      temp = trimmed.slice(0, -1);
+      continue;
+    }
+    
+    // Check for partial booleans/nulls/numbers
+    if (trimmed.match(/\b(t|tr|tru)$/i)) {
+      temp = trimmed.replace(/\b(t|tr|tru)$/i, 'true');
+      continue;
+    }
+    if (trimmed.match(/\b(f|fa|fal|fals)$/i)) {
+      temp = trimmed.replace(/\b(f|fa|fal|fals)$/i, 'false');
+      continue;
+    }
+    if (trimmed.match(/\b(n|nu|nul)$/i)) {
+      temp = trimmed.replace(/\b(n|nu|nul)$/i, 'null');
+      continue;
+    }
+    if (trimmed.match(/\d+[\.eE][-+]?$/)) {
+      temp = trimmed.replace(/[\.eE][-+]?$/, '');
+      continue;
+    }
+    
+    // Check if it ends with a string key
+    const stringMatch = trimmed.match(/"[^"\\]*(?:\\.[^"\\]*)*"$/);
+    if (stringMatch && stack.length > 0 && stack[stack.length - 1] === '{') {
+      const prefix = trimmed.slice(0, trimmed.length - stringMatch[0].length).trim();
+      const lastChar = prefix[prefix.length - 1];
+      if (lastChar !== ':') {
+        // It's a key without a value, strip it
+        temp = trimmed.slice(0, -stringMatch[0].length);
+        continue;
+      }
+    }
+    
+    break;
+  }
+  
+  repaired = temp;
+  
+  while (stack.length > 0) {
+    const openChar = stack.pop();
+    if (openChar === '{') {
+      repaired += '}';
+    } else if (openChar === '[') {
+      repaired += ']';
+    }
+  }
+  
+  return repaired;
+}
+
 // Helper to clean and parse JSON robustly from AI responses
 export function cleanAndParseJson<T>(rawText: string): T {
   let cleaned = rawText.trim();
@@ -11,44 +124,43 @@ export function cleanAndParseJson<T>(rawText: string): T {
   if (match && match[1]) {
     cleaned = match[1].trim();
   } else {
-    // 2. Try to find the first '{' or '[' and last '}' or ']'
+    // 2. Try to find the first '{' or '['
     const firstBrace = cleaned.indexOf('{');
     const firstBracket = cleaned.indexOf('[');
     let startIdx = -1;
-    let endIdx = -1;
     
     if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
       startIdx = firstBrace;
-      endIdx = cleaned.lastIndexOf('}');
     } else if (firstBracket !== -1) {
       startIdx = firstBracket;
-      endIdx = cleaned.lastIndexOf(']');
     }
     
-    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-      cleaned = cleaned.slice(startIdx, endIdx + 1);
+    if (startIdx !== -1) {
+      cleaned = cleaned.slice(startIdx);
     }
   }
 
   try {
     return JSON.parse(cleaned) as T;
   } catch (e) {
-    // 3. Try cleaning common syntax issues (trailing commas, control characters, missing closing braces)
     try {
-      // Repair missing closing braces before commas between array items
-      const missingBraceRegex = /("[\w\s-]+"\s*:\s*(?:"(?:[^"\\]|\\.)*"|\d+(?:\.\d+)?|true|false|null|\[[^\]]*\]))(\s*),\s*\{/g;
-      const repaired = cleaned.replace(missingBraceRegex, '$1$2},\n    {');
-
-      const fixedCommas = repaired
-        .replace(/,(\s*[\]}])/g, '$1') // remove trailing commas before closing braces
-        .replace(/[\u0000-\u001F\u007F-\u009F]/g, ''); // remove control chars
-      return JSON.parse(fixedCommas) as T;
+      const repaired = repairJson(cleaned);
+      return JSON.parse(repaired) as T;
     } catch (e2) {
-      console.error('JSON parse error. Raw text was:', rawText);
-      throw new Error(`Failed to parse AI output as JSON: ${(e2 as Error).message}`);
+      try {
+        // Fallback: repair missing closing braces in the middle of JSON arrays of objects
+        const missingBraceRegex = /([^}\s])(\s*,\s*\{\s*"[a-zA-Z0-9_]+"\s*:)/g;
+        const withBraces = cleaned.replace(missingBraceRegex, '$1}$2');
+        const repairedWithBraces = repairJson(withBraces);
+        return JSON.parse(repairedWithBraces) as T;
+      } catch (e3) {
+        console.error('JSON parse error. Raw text was:', rawText);
+        throw new Error(`Failed to parse AI output as JSON: ${(e2 as Error).message}`);
+      }
     }
   }
 }
+
 
 // Extract an array from parsed JSON, handling cases where the AI wrapped it in an object
 export function extractArray<T>(parsed: any): T[] {
@@ -142,9 +254,19 @@ To maintain visual consistency and story continuity, you must respect the existi
 4. Previous Plot: Use the recent plot summary to maintain story continuity.
 5. Subtitle Range Continuity: Subtitle ranges must be strictly consecutive and non-overlapping. For example, if a scene ends at subtitle index 15, the next scene MUST start at subtitle index 16. Do NOT overlap subtitle indices between scenes (e.g., scene A: 1-15, scene B: 15-20 is INVALID. It must be scene A: 1-15, scene B: 16-20).
 
+[CHARACTER VARIATION RULES]:
+For MAIN characters only, you must detect if the context requires a visual variation (change in outfit/clothing based on location/event, or change in age/time like flashback/younger version):
+1. Detect changes in location or activities where their clothing should change (e.g., at home, office/work, sport, party/formal events).
+2. Detect changes in time (e.g., past memories, flashbacks) where their age/generation should change.
+3. Naming convention for variants: [base_character_id]_[variant] (all lowercase, e.g., 'kudo_home', 'kudo_office', 'kudo_sport', 'kudo_young').
+4. Registration: If the variant is not in 'knownCharacters', you must list it in 'newCharacters' as a new entry. In its prompt description, specify the unique outfit or age for this variant (e.g., "Kudo at home wearing casual, comfortable home clothing", "Kudo as a younger version wearing a student uniform").
+5. Application: In the 'scenes' list, use the exact variant ID (e.g., 'kudo_home') in the 'characters' field for that scene.
+6. Do not create variants for minor characters or background extras; only apply this to main characters.
+
 [GUIDELINE FOR NEW CHARACTERS]:
 For each new character, generate a prompt matching EXACTLY this format (replace [Name] and [detailed physical description]):
 "Character Sheet of [Name], 3-view reference sheet (front, side, back), full body, white background, modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism, modern colored manga anime style, [detailed physical description], modern fashionable Japanese clothing, restrained emotional presence, natural standing posture, neutral facial expression, realistic fabric folds, cinematic realism, production design reference sheet."
+
 
 [GUIDELINE FOR NEW LOCATIONS]:
 For each new location/exterior, generate a prompt matching EXACTLY this format (replace [Location_Name_X] and [detailed environment description]):

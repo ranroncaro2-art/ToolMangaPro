@@ -364,14 +364,28 @@ def main():
                 mp3_files.append(os.path.join(voice_dir, filename))
         mp3_files.sort(key=natural_sort_key)
 
-        # 3. Map MP3 files to subtitles 1-to-1 in order
-        for idx, sub in enumerate(all_subtitles):
+        # 3. Map MP3 files to unique original subtitle IDs
+        unique_orig_ids = []
+        for sub in all_subtitles:
+            sub_id = int(sub.get('id', 0))
+            orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
+            if orig_id not in unique_orig_ids:
+                unique_orig_ids.append(orig_id)
+
+        orig_id_to_voice = {}
+        for idx, orig_id in enumerate(unique_orig_ids):
             if idx < len(mp3_files):
-                voice_file = mp3_files[idx]
+                orig_id_to_voice[orig_id] = mp3_files[idx]
+
+        for sub in all_subtitles:
+            sub_id = int(sub.get('id', 0))
+            orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
+            if orig_id in orig_id_to_voice:
+                voice_file = orig_id_to_voice[orig_id]
                 s_start = parse_timestamp(sub.get('startTime', ''))
                 s_end = parse_timestamp(sub.get('endTime', ''))
                 dur = max(0.5, s_end - s_start)
-                sub_to_voice[sub.get('id')] = {
+                sub_to_voice[sub_id] = {
                     'path': voice_file,
                     'duration': dur
                 }
@@ -388,15 +402,21 @@ def main():
             sub['shiftedStart'] = s_start
             sub['shiftedEnd'] = s_end
 
-    # Build final voice_files with shifted start times
+    # Build final voice_files with shifted start times (insert each original voice only once)
+    seen_orig_ids = set()
     for scene in scenes:
         for sub in scene.get('subtitles', []):
-            sub_id = sub.get('id')
+            sub_id = int(sub.get('id', 0))
+            orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
+            if orig_id in seen_orig_ids:
+                continue # Skip subsequent split blocks of the same original subtitle
+                
             if sub_id in sub_to_voice:
                 voice_file = sub_to_voice[sub_id]['path']
                 shifted_start = sub.get('shiftedStart', 0.0)
                 delay_ms = int(shifted_start * 1000)
                 voice_files.append((voice_file, delay_ms))
+                seen_orig_ids.add(orig_id)
                         
     print(f"Starting compile job. Type: {video_type}, Voice Dir: {voice_dir}, Voices found: {len(voice_files)}", flush=True)
     

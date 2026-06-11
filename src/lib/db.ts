@@ -19,6 +19,7 @@ export interface Project {
   autoDownloadVideo?: boolean;
   bgmSuggestions?: BgmSuggestionRow[];
   bgmVolumeDb?: number;
+  scriptContent?: string;
 }
 
 export interface BgmSuggestionRow {

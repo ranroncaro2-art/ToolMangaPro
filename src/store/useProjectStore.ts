@@ -637,11 +637,11 @@ interface ProjectState {
   processNextInQueue: () => Promise<void>;
 
   // Actions
-  generateSceneMapping: () => Promise<void>;
-  generateImagePrompts: () => Promise<void>;
-  generateAllMappingAndPrompts: () => Promise<void>;
+  generateSceneMapping: (resume?: boolean) => Promise<void>;
+  generateImagePrompts: (resume?: boolean) => Promise<void>;
+  generateAllMappingAndPrompts: (resume?: boolean) => Promise<void>;
   generateAllShotImages: () => Promise<void>;
-  generateFullCombo: () => Promise<void>;
+  generateFullCombo: (resume?: boolean) => Promise<void>;
   generateAssetImage: (type: 'character' | 'exterior' | 'prop', id: string, config?: { model?: string; aspect_ratio?: string; count?: number }) => Promise<void>;
   generateAllAssetImages: (selectedIds?: { characters: string[]; exteriors: string[]; props?: string[] }, config?: { model?: string; aspect_ratio?: string; count?: number }) => Promise<void>;
 
@@ -747,6 +747,14 @@ Nếu nhiều subtitle chỉ là cuộc trò chuyện liên tục trong cùng b�
 
 9. Strict Subtitle Ranges (CÁC PHẠM VI PHỤ ĐỀ KHÔNG TRÙNG LẶP)
 - Các phạm vi phụ đề phải nối tiếp nhau và KHÔNG ĐƯỢC TRÙNG LẶP. Ví dụ, nếu cảnh trước kết thúc ở phụ đề số 15, thì cảnh sau BẮT BUỘC phải bắt đầu từ phụ đề số 16 (Ví dụ Cảnh 1: '1-15', Cảnh 2: '16-20'). Tuyệt đối không lấy lại số phụ đề đã dùng (không viết Cảnh 2: '15-20' nếu Cảnh 1 là '1-15').
+
+10. Character Variation Rules (TẠO BIẾN THỂ NHÂN VẬT THEO BỐI CẢNH VÀ THỜI GIAN)
+- Chỉ áp dụng quy tắc này cho các NHÂN VẬT CHÍNH (main characters). Không áp dụng cho nhân vật phụ hoặc quần chúng (extras/background characters).
+- Nhận diện bối cảnh, mốc thời gian hoặc tình huống trong truyện để tự động tạo và sử dụng các biến thể nhân vật phù hợp:
+  + Biến thể theo thời gian/tuổi tác: Nếu câu chuyện kể về quá khứ, hồi tưởng, phiên bản thời trẻ (flashback/younger version), hãy tạo biến thể trẻ tuổi. Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'kudo_young').
+  + Biến thể theo địa điểm/hoạt động: Nếu nhân vật chính thay đổi trang phục cho phù hợp với môi trường (ở nhà, đi làm, chơi thể thao, dự tiệc...), hãy tạo biến thể tương ứng. Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'kudo_home', 'kudo_office', 'kudo_sport', 'kudo_party').
+- Đăng ký biến thể: Các biến thể này phải được xem như nhân vật mới và khai báo trong danh sách "newCharacters" (nếu chưa có trong danh sách nhân vật đã biết 'knownCharacters'). Trong phần prompt của biến thể mới đó, mô tả rõ trang phục hoặc độ tuổi đặc trưng (ví dụ: "Character Sheet of kudo_home, ... wearing casual, comfortable home clothing", "Character Sheet of kudo_young, ... as a younger version").
+- Áp dụng trong cảnh: Trong trường "characters" của mỗi cảnh, điền chính xác ID của biến thể được dùng (ví dụ: "kudo_home" hoặc "kudo_young" thay vì tên gốc "kudo").
 
 OUTPUT FORMAT:
 Phải trả về kết quả dưới dạng một mảng JSON (JSON array), trong đó mỗi phần tử có cấu trúc chính xác như sau:
@@ -1010,7 +1018,8 @@ async function executeSceneMappingIncrementalFlow(
   sceneMappingPrompt: string,
   apiConfig: any,
   set: any,
-  get: any
+  get: any,
+  resume: boolean = false
 ): Promise<{ scenes: SceneMappingRow[]; characters: any[]; exteriors: any[]; props: any[] }> {
   const { provider, apiKey, modelName } = apiConfig;
   const providerInstance = AIProviderFactory.getProvider(provider);
@@ -1034,10 +1043,41 @@ async function executeSceneMappingIncrementalFlow(
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let totalCost = 0;
+  let startIndex = 0;
+
+  if (resume) {
+    const active = get().currentProject;
+    allScenes = active.sceneMapping ? [...active.sceneMapping] : [];
+    knownCharacters = active.characters ? [...active.characters] : [];
+    knownExteriors = active.exteriors ? [...active.exteriors] : [];
+    knownProps = active.props ? [...active.props] : [];
+    
+    if (allScenes.length > 0) {
+      const lastScene = allScenes[allScenes.length - 1];
+      if (lastScene && lastScene.subtitleRange) {
+        const rangeParts = lastScene.subtitleRange.split('-');
+        const lastSubId = parseInt(rangeParts[rangeParts.length - 1].trim(), 10);
+        if (!isNaN(lastSubId)) {
+          const nextIdx = subtitleBlocks.findIndex(b => b.id > lastSubId);
+          if (nextIdx !== -1) {
+            startIndex = nextIdx;
+          } else {
+            // Already fully mapped
+            return {
+              scenes: allScenes,
+              characters: knownCharacters,
+              exteriors: knownExteriors,
+              props: knownProps
+            };
+          }
+        }
+      }
+    }
+  }
 
   const totalChunks = Math.ceil(subtitleBlocks.length / srtChunkSize);
 
-  for (let i = 0; i < subtitleBlocks.length; i += srtChunkSize) {
+  for (let i = startIndex; i < subtitleBlocks.length; i += srtChunkSize) {
     const chunkIndex = Math.floor(i / srtChunkSize) + 1;
     
     // Update batch status in the UI store
@@ -1232,22 +1272,40 @@ async function executeSceneMappingIncrementalFlow(
   return { scenes: finalRecalculatedScenes, characters: knownCharacters, exteriors: knownExteriors, props: knownProps };
 }
 
-// Helper function for contextual image prompt generation
 async function executeImagePromptsContextualFlow(
   projId: string,
   sceneMapping: SceneMappingRow[],
   imagePromptPrompt: string,
   apiConfig: any,
   set: any,
-  get: any
+  get: any,
+  resume: boolean = false
 ): Promise<ImagePromptRow[]> {
   const { provider, apiKey, modelName } = apiConfig;
   const providerInstance = AIProviderFactory.getProvider(provider);
 
   const batchSize = 15; // Safe batch size
   let mergedPrompts: ImagePromptRow[] = [];
-  const totalBatches = Math.ceil(sceneMapping.length / batchSize);
   const active = get().currentProject;
+  let startIndex = 0;
+
+  if (resume) {
+    mergedPrompts = active.imagePrompts ? [...active.imagePrompts] : [];
+    if (mergedPrompts.length > 0) {
+      const lastPrompt = mergedPrompts[mergedPrompts.length - 1];
+      if (lastPrompt && lastPrompt.stt) {
+        const nextIdx = sceneMapping.findIndex(s => s.stt > lastPrompt.stt);
+        if (nextIdx !== -1) {
+          startIndex = nextIdx;
+        } else {
+          // Already fully generated
+          return mergedPrompts;
+        }
+      }
+    }
+  }
+
+  const totalBatches = Math.ceil(sceneMapping.length / batchSize);
 
   const finalImagePromptPrompt = `${imagePromptPrompt}
         
@@ -1255,7 +1313,7 @@ async function executeImagePromptsContextualFlow(
 - CỰC KỲ QUAN TRỌNG: Tuyệt đối KHÔNG viết hoặc mô tả bất kỳ từ khóa style vẽ nào (như nét vẽ manga, anime, màu sắc, (no text, no subtitle, manga color style),...) vào trường "description". Chỉ mô tả bối cảnh và diễn biến cơ bản.
 - Hãy bỏ qua yêu cầu mô tả phong cách Anime Manga ở mục 6.`;
 
-  for (let i = 0; i < sceneMapping.length; i += batchSize) {
+  for (let i = startIndex; i < sceneMapping.length; i += batchSize) {
     const batchIndex = Math.floor(i / batchSize) + 1;
     if (get().currentProject.id === projId) {
       set({
@@ -2127,6 +2185,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     provider: 'gemini',
     modelName: 'gemini-2.5-flash',
     srtContent: '',
+    scriptContent: '',
     srtMeta: { lineCount: 0, duration: '00:00:00' },
     sceneMapping: [],
     imagePrompts: [],
@@ -2156,6 +2215,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           provider: state.apiConfig.provider,
           modelName: state.apiConfig.modelName,
           srtContent: '',
+          scriptContent: '',
           srtMeta: { lineCount: 0, duration: '00:00:00' },
           sceneMapping: [],
           imagePrompts: [],
@@ -2458,6 +2518,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       provider: get().apiConfig.provider,
       modelName: get().apiConfig.modelName,
       srtContent: srtContent || '',
+      scriptContent: '',
       srtMeta,
       sceneMapping: [],
       imagePrompts: [],
@@ -2476,6 +2537,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         provider: get().apiConfig.provider,
         modelName: get().apiConfig.modelName,
         srtContent: srtContent || '',
+        scriptContent: '',
         srtMeta,
         sceneMapping: [],
         imagePrompts: [],
@@ -2508,6 +2570,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       provider: get().apiConfig.provider,
       modelName: get().apiConfig.modelName,
       srtContent: synced.srtContent,
+      scriptContent: active.scriptContent || '',
       srtMeta: synced.srtMeta,
       sceneMapping: synced.sceneMapping,
       imagePrompts: synced.imagePrompts,
@@ -2563,6 +2626,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           provider: proj.provider,
           modelName: proj.modelName,
           srtContent: proj.srtContent,
+          scriptContent: proj.scriptContent || '',
           srtMeta: proj.srtMeta,
           sceneMapping: proj.sceneMapping,
           imagePrompts: proj.imagePrompts,
@@ -2603,6 +2667,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           provider: 'gemini',
           modelName: 'gemini-2.5-flash',
           srtContent: '',
+          scriptContent: '',
           srtMeta: { lineCount: 0, duration: '00:00:00' },
           sceneMapping: [],
           imagePrompts: [],
@@ -2628,6 +2693,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         provider: proj.provider || get().apiConfig.provider,
         modelName: proj.modelName || get().apiConfig.modelName,
         srtContent: proj.srtContent || '',
+        scriptContent: proj.scriptContent || '',
         srtMeta: JSON.parse(JSON.stringify(proj.srtMeta || { lineCount: 0, duration: '00:00:00' })),
         sceneMapping: JSON.parse(JSON.stringify(proj.sceneMapping || [])),
         imagePrompts: JSON.parse(JSON.stringify(proj.imagePrompts || [])),
@@ -3120,7 +3186,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   // AI Actions
-  generateSceneMapping: async () => {
+  generateSceneMapping: async (resume = false) => {
     let active = get().currentProject;
     let projId = active.id;
 
@@ -3150,7 +3216,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().sceneMappingPrompt,
           get().apiConfig,
           set,
-          get
+          get,
+          resume
         );
         await get().loadHistory();
       } finally {
@@ -3168,7 +3235,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().addToQueue(projId!, 'mapping', runTask);
   },
 
-  generateImagePrompts: async () => {
+  generateImagePrompts: async (resume = false) => {
     let active = get().currentProject;
     let projId = active.id;
 
@@ -3199,7 +3266,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().imagePromptPrompt,
           get().apiConfig,
           set,
-          get
+          get,
+          resume
         );
         if (get().currentProject.id === projId) {
           set({ batchStatus: 'Generation complete!' });
@@ -3223,7 +3291,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().addToQueue(projId!, 'prompts', runTask);
   },
 
-  generateAllMappingAndPrompts: async () => {
+  generateAllMappingAndPrompts: async (resume = false) => {
     let active = get().currentProject;
     let projId = active.id;
 
@@ -3254,7 +3322,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().sceneMappingPrompt,
           get().apiConfig,
           set,
-          get
+          get,
+          resume
         );
 
         // 2. Image Prompts
@@ -3271,7 +3340,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().imagePromptPrompt,
           get().apiConfig,
           set,
-          get
+          get,
+          resume
         );
 
         if (get().currentProject.id === projId) {
@@ -3300,7 +3370,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
 
 
-  generateFullCombo: async () => {
+  generateFullCombo: async (resume = false) => {
     let active = get().currentProject;
     let projId = active.id;
 
@@ -3331,7 +3401,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().sceneMappingPrompt,
           get().apiConfig,
           set,
-          get
+          get,
+          resume
         );
 
         // 2. Image Prompts
@@ -3348,7 +3419,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().imagePromptPrompt,
           get().apiConfig,
           set,
-          get
+          get,
+          resume
         );
 
         // 3. Generate Reference Images
