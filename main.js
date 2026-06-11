@@ -87,6 +87,7 @@ function createWindow() {
     width: 1440,
     height: 900,
     title: 'TOOL MANGA ANIME PRO',
+    icon: path.join(__dirname, 'public', 'logo.png'),
     show: true, // Show the window immediately on start!
     webPreferences: {
       nodeIntegration: false,
@@ -200,7 +201,7 @@ ipcMain.handle('trigger-app-update', async (event, { token, version }) => {
     const repoName = 'ToolMangaPro';
     
     // 1. Fetch release details from GitHub API to locate the setup asset
-    const releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/tags/v${version}`;
+    let releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/tags/v${version}`;
     const headers = {
       'Accept': 'application/vnd.github+json',
       'User-Agent': 'ToolMangaPro-Updater'
@@ -209,9 +210,24 @@ ipcMain.handle('trigger-app-update', async (event, { token, version }) => {
       headers['Authorization'] = `Bearer ${token.trim()}`;
     }
     
-    console.log(`[Updater] Fetching release metadata for version: v${version}...`);
-    const releaseRes = await fetch(releaseUrl, { headers });
+    console.log(`[Updater] Fetching release metadata for version: v${version} from ${releaseUrl}...`);
+    let releaseRes = await fetch(releaseUrl, { headers });
+    
+    // Fallback: If v3.0.1 tag returns 404, try fetching without the 'v' prefix (3.0.1)
+    if (releaseRes.status === 404) {
+      console.log(`[Updater] Release v${version} not found (404). Trying tag name without 'v' prefix...`);
+      releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/tags/${version}`;
+      console.log(`[Updater] Fetching release metadata for version: ${version} from ${releaseUrl}...`);
+      releaseRes = await fetch(releaseUrl, { headers });
+    }
+    
     if (!releaseRes.ok) {
+      if (releaseRes.status === 404) {
+        throw new Error(`Không tìm thấy bản phát hành v${version} hoặc ${version} trên GitHub. Vui lòng đảm bảo rằng:
+1. Bạn đã tạo/nháp Release với đúng tag v${version} hoặc ${version} trên GitHub.
+2. File setup .exe đã được đính kèm vào Release đó.
+3. GitHub Token của bạn là chính xác và có quyền 'repo' để đọc kho lưu trữ riêng tư (private repository).`);
+      }
       throw new Error(`GitHub API returned status ${releaseRes.status}: ${releaseRes.statusText}`);
     }
     

@@ -178,10 +178,11 @@ export default function Header() {
       <header className="glass-panel border-b border-gray-800 px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 sticky top-0 z-50">
       {/* Brand & Project Name */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 to-fuchsia-600 flex items-center justify-center font-bold text-lg text-white shadow-lg shadow-violet-500/20">
-            M
-          </div>
+          <img
+            src="/logo.png"
+            alt="M"
+            className="w-8 h-8 rounded-lg object-cover shadow-lg shadow-violet-500/20"
+          />
           <span className="font-bold text-lg bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
             TOOL MANGA ANIME PRO
           </span>
