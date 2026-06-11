@@ -176,8 +176,8 @@ export default function Header() {
   return (
     <>
       <header className="glass-panel border-b border-gray-800 px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 sticky top-0 z-50">
-      {/* Brand & Project Name */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+        <div className="flex items-center gap-2">
           <img
             src="/logo.png"
             alt="M"
