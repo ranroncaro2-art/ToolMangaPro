@@ -267,6 +267,80 @@ def download_url(url, temp_dir):
         print(f"Failed to download URL {url}: {e}", file=sys.stderr)
         return None
 
+def resolve_ffmpeg_path():
+    # 1. Check same directory as the executable/script
+    possible_paths = []
+    
+    # Executable directory (for PyInstaller compiled exe)
+    if hasattr(sys, 'frozen'):
+        exe_dir = os.path.dirname(sys.executable)
+        possible_paths.append(os.path.join(exe_dir, "ffmpeg.exe"))
+        possible_paths.append(os.path.join(exe_dir, "ffmpeg"))
+        
+    # Script directory
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        possible_paths.append(os.path.join(script_dir, "ffmpeg.exe"))
+        possible_paths.append(os.path.join(script_dir, "ffmpeg"))
+        # Relative to src/lib/videoCompiler.py
+        possible_paths.append(os.path.normpath(os.path.join(script_dir, "..", "..", "resources", "bin", "ffmpeg.exe")))
+        possible_paths.append(os.path.normpath(os.path.join(script_dir, "..", "..", "resources", "bin", "ffmpeg")))
+    except:
+        pass
+        
+    # Working directory
+    possible_paths.append(os.path.join(os.getcwd(), "resources", "bin", "ffmpeg.exe"))
+    possible_paths.append(os.path.join(os.getcwd(), "resources", "bin", "ffmpeg"))
+    
+    for path in possible_paths:
+        if os.path.exists(path) and os.path.isfile(path):
+            print(f"Found bundled ffmpeg at: {path}", flush=True)
+            return path
+            
+    # 2. Try static_ffmpeg
+    try:
+        from static_ffmpeg import run
+        ffmpeg_path, _ = run.get_or_fetch_platform_executables_else_raise()
+        print(f"Resolved ffmpeg via static-ffmpeg: {ffmpeg_path}", flush=True)
+        return ffmpeg_path
+    except Exception as e:
+        print(f"Warning: static-ffmpeg failed: {e}", file=sys.stderr)
+        
+    # 3. Fallback to system path
+    return "ffmpeg"
+
+def get_audio_duration(ffmpeg_path, file_path):
+    import subprocess
+    import re
+    # Try ffprobe first
+    ffprobe_path = ffmpeg_path.replace('ffmpeg.exe', 'ffprobe.exe').replace('ffmpeg', 'ffprobe')
+    if os.path.exists(ffprobe_path):
+        try:
+            cmd = [ffprobe_path, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file_path]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', timeout=5)
+            if res.returncode == 0:
+                val = res.stdout.strip()
+                if val:
+                    return float(val)
+        except Exception as e:
+            print(f"ffprobe failed to get duration: {e}", file=sys.stderr)
+            
+    # Fallback to running ffmpeg -i
+    try:
+        cmd = [ffmpeg_path, '-i', file_path]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8', timeout=5)
+        # Duration: 00:01:23.45
+        pattern = r"Duration:\s*(\d+):(\d+):(\d+\.\d+)"
+        match = re.search(pattern, res.stderr)
+        if match:
+            hours = int(match.group(1))
+            minutes = int(match.group(2))
+            seconds = float(match.group(3))
+            return hours * 3600 + minutes * 60 + seconds
+    except Exception as e:
+        print(f"ffmpeg -i failed to get duration: {e}", file=sys.stderr)
+    return 0.0
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python videoCompiler.py <json_payload_or_path>", file=sys.stderr)
@@ -293,29 +367,7 @@ def main():
     srt_content = payload.get('srtContent', '')
     burn_subtitles = payload.get('burnSubtitles', False)
     
-    temp_srt_path = None
-    if burn_subtitles and srt_content.strip():
-        # Create temp srt file inside project output directory
-        project_dir = os.path.dirname(output_file)
-        temp_srt_path = os.path.join(project_dir, f"temp_subtitles_{uuid.uuid4().hex}.srt")
-        try:
-            with open(temp_srt_path, 'w', encoding='utf-8') as f:
-                f.write(srt_content)
-            print(f"Created temporary SRT file: {temp_srt_path}", flush=True)
-            
-            # Register atexit cleanup to delete it on exit
-            def cleanup_srt():
-                if temp_srt_path and os.path.exists(temp_srt_path):
-                    try:
-                        os.remove(temp_srt_path)
-                        print(f"Cleaned up temporary SRT file: {temp_srt_path}", flush=True)
-                    except Exception as e:
-                        print(f"Warning: failed to remove temporary SRT file {temp_srt_path}: {e}", file=sys.stderr)
-            import atexit
-            atexit.register(cleanup_srt)
-        except Exception as e:
-            print(f"Error creating temporary SRT file: {e}", file=sys.stderr)
-            temp_srt_path = None
+
     
     if not scenes:
         print("Error: No scenes list supplied in payload.", file=sys.stderr)
@@ -329,29 +381,34 @@ def main():
     local_videos_dir = os.path.join(project_dir, 'videos')
     
     # Resolve ffmpeg early to compute audio durations
-    ffmpeg_path = "ffmpeg"
-    try:
-        from static_ffmpeg import run
-        ffmpeg_path, _ = run.get_or_fetch_platform_executables_else_raise()
-    except Exception as e:
-        print(f"Warning: static-ffmpeg failed, using fallback: {e}", file=sys.stderr)
+    ffmpeg_path = resolve_ffmpeg_path()
+
+    # 1. Collect all subtitles chronologically across all scenes and set original start/end times
+    all_subtitles = []
+    seen_sub_ids = set()
+    for scene in scenes:
+        scene_subs = scene.get('subtitles', [])
+        scene_subs.sort(key=lambda s: parse_timestamp(s.get('startTime', '')))
+        
+        # Calculate original timestamps for each subtitle block
+        for sub in scene_subs:
+            sub_id = sub.get('id')
+            s_start = parse_timestamp(sub.get('startTime', ''))
+            s_end = parse_timestamp(sub.get('endTime', ''))
+            sub['shiftedStart'] = s_start
+            sub['shiftedEnd'] = s_end
+            
+            if sub_id and sub_id not in seen_sub_ids:
+                all_subtitles.append(sub)
+                seen_sub_ids.add(sub_id)
+
+    # Sort chronologically by start time
+    all_subtitles.sort(key=lambda s: s.get('shiftedStart', 0.0))
 
     # Scan for voice MP3 files mapping them to subtitles chronologically
     voice_files = []
     sub_to_voice = {}
     if voice_dir and os.path.exists(voice_dir):
-        # 1. Collect all subtitles chronologically
-        all_subtitles = []
-        seen_sub_ids = set()
-        for scene in scenes:
-            for sub in scene.get('subtitles', []):
-                sub_id = sub.get('id')
-                if sub_id and sub_id not in seen_sub_ids:
-                    all_subtitles.append(sub)
-                    seen_sub_ids.add(sub_id)
-        # Sort chronologically by start time
-        all_subtitles.sort(key=lambda s: parse_timestamp(s.get('startTime', '')))
-
         # 2. Collect and naturally sort all MP3 files
         import re
         def natural_sort_key(s):
@@ -382,41 +439,28 @@ def main():
             orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
             if orig_id in orig_id_to_voice:
                 voice_file = orig_id_to_voice[orig_id]
-                s_start = parse_timestamp(sub.get('startTime', ''))
-                s_end = parse_timestamp(sub.get('endTime', ''))
+                s_start = sub.get('shiftedStart', 0.0)
+                s_end = sub.get('shiftedEnd', 0.0)
                 dur = max(0.5, s_end - s_start)
                 sub_to_voice[sub_id] = {
                     'path': voice_file,
                     'duration': dur
                 }
 
-    # Set subtitle timings matching the original timestamps (no shifting/stretching)
-    for scene in scenes:
-        scene_subs = scene.get('subtitles', [])
-        scene_subs.sort(key=lambda s: parse_timestamp(s.get('startTime', '')))
-        
-        # Calculate original timestamps for each subtitle block
-        for sub in scene_subs:
-            s_start = parse_timestamp(sub.get('startTime', ''))
-            s_end = parse_timestamp(sub.get('endTime', ''))
-            sub['shiftedStart'] = s_start
-            sub['shiftedEnd'] = s_end
-
     # Build final voice_files with shifted start times (insert each original voice only once)
     seen_orig_ids = set()
-    for scene in scenes:
-        for sub in scene.get('subtitles', []):
-            sub_id = int(sub.get('id', 0))
-            orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
-            if orig_id in seen_orig_ids:
-                continue # Skip subsequent split blocks of the same original subtitle
-                
-            if sub_id in sub_to_voice:
-                voice_file = sub_to_voice[sub_id]['path']
-                shifted_start = sub.get('shiftedStart', 0.0)
-                delay_ms = int(shifted_start * 1000)
-                voice_files.append((voice_file, delay_ms))
-                seen_orig_ids.add(orig_id)
+    for sub in all_subtitles:
+        sub_id = int(sub.get('id', 0))
+        orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
+        if orig_id in seen_orig_ids:
+            continue # Skip subsequent split blocks of the same original subtitle
+            
+        if sub_id in sub_to_voice:
+            voice_file = sub_to_voice[sub_id]['path']
+            shifted_start = sub.get('shiftedStart', 0.0)
+            delay_ms = int(shifted_start * 1000)
+            voice_files.append((voice_file, delay_ms))
+            seen_orig_ids.add(orig_id)
                         
     print(f"Starting compile job. Type: {video_type}, Voice Dir: {voice_dir}, Voices found: {len(voice_files)}", flush=True)
     
@@ -470,11 +514,19 @@ def main():
     print(f"Subtitles Font Configuration: CJK support = {has_japanese}", flush=True)
     
     # Process scenes sequentially
+    total_frames_written = 0
+    first_scene_start = float(scenes[0].get('sceneStart', 0.0)) if scenes else 0.0
     for index, scene in enumerate(scenes):
         stt = scene.get('stt', index + 1)
-        target_duration = float(scene.get('targetDuration', 5.0))
-        target_frames = int(target_duration * fps)
         scene_start = float(scene.get('sceneStart', 0.0))
+        scene_end = scene_start + float(scene.get('targetDuration', 5.0))
+        
+        # Calculate target frames using cumulative duration to prevent rounding drift
+        cumulative_duration = scene_end - first_scene_start
+        target_cumulative_frames = int(cumulative_duration * fps)
+        target_frames = target_cumulative_frames - total_frames_written
+        target_frames = max(12, target_frames)  # Ensure at least 0.5 seconds
+        target_duration = target_frames / fps
         
         v_url = scene.get('videoUrl')
         img_url = scene.get('imageUrl')
@@ -580,15 +632,15 @@ def main():
             
         # 3. Burn Subtitles and Write Frames to Writer
         for f_idx, cv_frame in enumerate(frames_list):
-            t_elapsed = f_idx / fps
-            abs_time = scene_start + t_elapsed
+            v_time = total_frames_written / fps
+            total_frames_written += 1
             
-            # Find active subtitle
+            # Find active subtitle from the global list using the exact frame video time
             active_text = ""
-            for sub in subtitles:
+            for sub in all_subtitles:
                 s_start = sub.get('shiftedStart', 0.0)
                 s_end = sub.get('shiftedEnd', 0.0)
-                if abs_time >= s_start and abs_time <= s_end:
+                if v_time >= s_start and v_time <= s_end:
                     active_text = sub.get('text', '')
                     break
                     
@@ -596,8 +648,8 @@ def main():
             if cv_frame.shape[1] != width or cv_frame.shape[0] != height:
                 cv_frame = cv2.resize(cv_frame, (width, height))
                 
-            # If subtitle text is active, draw it!
-            if active_text:
+            # If burn_subtitles is enabled and subtitle text is active, draw it!
+            if burn_subtitles and active_text:
                 # BGR -> RGB for Pillow
                 rgb_frame = cv2.cvtColor(cv_frame, cv2.COLOR_BGR2RGB)
                 pil_frame = Image.fromarray(rgb_frame)
@@ -641,9 +693,20 @@ def main():
             for fpath, _ in voice_files:
                 cmd.extend(['-i', fpath])
                 
-            # 2. Add BGM files (stream_loop -1 loops BGM indefinitely)
+            # 2. Add BGM files (with calculated loop count to fit segment duration)
             for seg in valid_bgm_segments:
-                cmd.extend(['-stream_loop', '-1', '-i', seg['audioPath']])
+                start = float(seg.get('start', 0.0))
+                end = float(seg.get('end', 0.0))
+                dur = max(0.1, end - start)
+                bgm_dur = get_audio_duration(ffmpeg_path, seg['audioPath'])
+                if bgm_dur > 0:
+                    plays_needed = int(dur / bgm_dur)
+                    if dur % bgm_dur > 0.001:
+                        plays_needed += 1
+                    loop_count = max(0, plays_needed - 1)
+                else:
+                    loop_count = -1
+                cmd.extend(['-stream_loop', str(loop_count), '-i', seg['audioPath']])
                 
             filter_parts = []
             
@@ -651,7 +714,7 @@ def main():
             v_count = len(voice_files)
             for idx, (_, delay_ms) in enumerate(voice_files):
                 input_idx = idx + 2
-                filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay={delay_ms}:all=true[v{idx}];")
+                filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay={delay_ms}|{delay_ms}[v{idx}];")
                 
             # BGM processing (BGM inputs start at index 2 + v_count)
             b_count = len(valid_bgm_segments)
@@ -661,7 +724,7 @@ def main():
                 end = float(seg.get('end', 0.0))
                 dur = max(0.1, end - start)
                 start_ms = int(start * 1000)
-                filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}:all=true[b{idx}];")
+                filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}|{start_ms}[b{idx}];")
                 
             # Compile mix commands
             if v_count > 0 and b_count > 0:
@@ -671,18 +734,14 @@ def main():
                 mix_bgms = "".join(f"[b{idx}]" for idx in range(b_count))
                 filter_parts.append(f"[0:a]{mix_bgms}amix=inputs={b_count+1}:duration=first:dropout_transition=0:normalize=0[bgm_mixed];")
                 
-                filter_parts.append("[voice_mixed][bgm_mixed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]")
+                filter_parts.append("[voice_mixed][bgm_mixed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa];")
             elif v_count > 0:
                 mix_voices = "".join(f"[v{idx}]" for idx in range(v_count))
-                filter_parts.append(f"[0:a]{mix_voices}amix=inputs={v_count+1}:duration=first:dropout_transition=0:normalize=0[outa]")
+                filter_parts.append(f"[0:a]{mix_voices}amix=inputs={v_count+1}:duration=first:dropout_transition=0:normalize=0[outa];")
             elif b_count > 0:
                 mix_bgms = "".join(f"[b{idx}]" for idx in range(b_count))
-                filter_parts.append(f"[0:a]{mix_bgms}amix=inputs={b_count+1}:duration=first:dropout_transition=0:normalize=0[outa]")
+                filter_parts.append(f"[0:a]{mix_bgms}amix=inputs={b_count+1}:duration=first:dropout_transition=0:normalize=0[outa];")
             
-            if temp_srt_path:
-                escaped_srt = temp_srt_path.replace('\\', '/').replace(':', '\\:')
-                filter_parts.append(f"[1:v]subtitles='{escaped_srt}'[v_sub];")
-                
             filter_complex = "".join(filter_parts)
             filter_script_path = temp_output_file + ".filter.txt"
             try:
@@ -691,7 +750,7 @@ def main():
                     
                 cmd.extend([
                     '-filter_complex_script', filter_script_path,
-                    '-map', '[v_sub]' if temp_srt_path else '1:v',
+                    '-map', '1:v',
                     '-map', '[outa]',
                     '-c:v', 'libx264',
                     '-preset', 'superfast',
@@ -741,7 +800,7 @@ def main():
                     filter_parts = []
                     for idx, (_, delay_ms) in enumerate(voice_chunk):
                         input_idx = idx + 1 # starts at 1
-                        filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay={delay_ms}:all=true[a{idx}];")
+                        filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay={delay_ms}|{delay_ms}[a{idx}];")
                         
                     mix_inputs = "".join(f"[a{idx}]" for idx in range(len(voice_chunk)))
                     filter_parts.append(f"[0:a]{mix_inputs}amix=inputs={len(voice_chunk)+1}:duration=first:dropout_transition=0:normalize=0[outa]")
@@ -779,7 +838,18 @@ def main():
                     
                 # Add BGM inputs (inputs C+1 to C+B)
                 for seg in valid_bgm_segments:
-                    cmd.extend(['-stream_loop', '-1', '-i', seg['audioPath']])
+                    start = float(seg.get('start', 0.0))
+                    end = float(seg.get('end', 0.0))
+                    dur = max(0.1, end - start)
+                    bgm_dur = get_audio_duration(ffmpeg_path, seg['audioPath'])
+                    if bgm_dur > 0:
+                        plays_needed = int(dur / bgm_dur)
+                        if dur % bgm_dur > 0.001:
+                            plays_needed += 1
+                        loop_count = max(0, plays_needed - 1)
+                    else:
+                        loop_count = -1
+                    cmd.extend(['-stream_loop', str(loop_count), '-i', seg['audioPath']])
                     
                 # Add video input (input C+B+1)
                 cmd.extend(['-i', temp_output_file])
@@ -798,7 +868,7 @@ def main():
                 if b_count > 0:
                     filter_parts.append(f"[0:a]{mix_voices}amix=inputs={v_count+1}:duration=first:dropout_transition=0:normalize=0[voice_mixed];")
                 else:
-                    filter_parts.append(f"[0:a]{mix_voices}amix=inputs={v_count+1}:duration=first:dropout_transition=0:normalize=0[outa]")
+                    filter_parts.append(f"[0:a]{mix_voices}amix=inputs={v_count+1}:duration=first:dropout_transition=0:normalize=0[outa];")
                 
                 # BGM processing (BGM inputs start at index v_count + 1)
                 for idx, seg in enumerate(valid_bgm_segments):
@@ -807,7 +877,7 @@ def main():
                     end = float(seg.get('end', 0.0))
                     dur = max(0.1, end - start)
                     start_ms = int(start * 1000)
-                    filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}:all=true[b{idx}];")
+                    filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}|{start_ms}[b{idx}];")
                     
                 # Mix BGMs
                 if b_count > 0:
@@ -816,12 +886,8 @@ def main():
                     
                 # Combine Voice and BGM
                 if b_count > 0:
-                    filter_parts.append("[voice_mixed][bgm_mixed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa]")
+                    filter_parts.append("[voice_mixed][bgm_mixed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[outa];")
                 
-                if temp_srt_path:
-                    escaped_srt = temp_srt_path.replace('\\', '/').replace(':', '\\:')
-                    filter_parts.append(f"[{video_input_idx}:v]subtitles='{escaped_srt}'[v_sub];")
-                    
                 filter_complex = "".join(filter_parts)
                 filter_script_path = temp_output_file + ".filter.txt"
                 try:
@@ -830,7 +896,7 @@ def main():
                         
                     cmd.extend([
                         '-filter_complex_script', filter_script_path,
-                        '-map', '[v_sub]' if temp_srt_path else f'{video_input_idx}:v', # map the video stream
+                        '-map', f'{video_input_idx}:v', # map the video stream
                         '-map', '[outa]',
                         '-c:v', 'libx264',
                         '-preset', 'superfast',
@@ -872,20 +938,12 @@ def main():
     else:
         # No voice files, re-encode temp video directly to H.264 with yuv420p using FFmpeg
         print("Re-encoding video to standard H.264 (yuv420p)...", flush=True)
-        ffmpeg_path = "ffmpeg"
-        try:
-            from static_ffmpeg import run
-            ffmpeg_path, _ = run.get_or_fetch_platform_executables_else_raise()
-        except Exception as e:
-            print(f"Warning: static-ffmpeg failed, using fallback: {e}", file=sys.stderr)
+        ffmpeg_path = resolve_ffmpeg_path()
             
         cmd = [
             ffmpeg_path, '-y',
             '-i', temp_output_file,
         ]
-        if temp_srt_path:
-            escaped_srt = temp_srt_path.replace('\\', '/').replace(':', '\\:')
-            cmd.extend(['-vf', f"subtitles='{escaped_srt}'"])
         cmd.extend([
             '-c:v', 'libx264',
             '-preset', 'superfast',

@@ -919,9 +919,6 @@ function recalculateProjectTimeRanges(scenes: SceneMappingRow[], srtContent: str
   if (blocks.length === 0) return scenes;
 
   let prevEndTime = '00:00:00,000';
-  if (blocks[0]) {
-    prevEndTime = blocks[0].startTime;
-  }
 
   return scenes.map((scene) => {
     const range = (scene.subtitleRange || '').trim();

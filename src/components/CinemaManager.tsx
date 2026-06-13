@@ -1126,20 +1126,17 @@ export default function CinemaManager() {
 
   // Extract Subtitle matching current time (based on original timestamps since audio duration = sub duration)
   const activeSubtitle = useMemo<SubtitleBlock | null>(() => {
-    if (!activeScene || srtBlocks.length === 0) return null;
-    
-    const sceneSubtitles = getSubtitlesForScene(activeScene.subtitleRange, srtBlocks);
-    if (sceneSubtitles.length === 0) return null;
+    if (srtBlocks.length === 0) return null;
 
     // Find the subtitle that currently matches currentTime
-    const found = sceneSubtitles.find(sub => {
+    const found = srtBlocks.find(sub => {
       const start = parseTimestampToSeconds(sub.startTime);
       const end = parseTimestampToSeconds(sub.endTime);
       return currentTime >= start && currentTime <= end;
     });
 
     return found || null;
-  }, [activeScene, srtBlocks, currentTime]);
+  }, [srtBlocks, currentTime]);
 
   // Auto-wrap active subtitle text
   const wrappedSubtitleText = useMemo(() => {
