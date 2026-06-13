@@ -16,7 +16,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [copied, setCopied] = useState(false);
 
   // Hardcoded secure API endpoint
-  const apiEndpoint = 'https://script.google.com/macros/s/AKfycbzEC1f4NUh-7EP2C8MP4-yFEOrWsACseXyL7qUG6c3NgJ-Ol5XWhVrjGWo2kDbyrMY/exec';
+  const apiEndpoint = 'https://script.google.com/macros/s/AKfycbx0hbnhKtbENSTCO5qUOj02vcf4qy8Z7LFKXvsYUpbE9p-pg1zF9_n6GRZuMLgRwQk/exec';
 
   // States
   const [loading, setLoading] = useState(false);

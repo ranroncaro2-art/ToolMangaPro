@@ -158,7 +158,7 @@ ipcMain.handle('get-mac-address', () => {
 
 // Handle IPC query for login verification (runs in Node.js main process, bypassing CORS)
 ipcMain.handle('verify-login', async (event, payload) => {
-  const apiEndpoint = 'https://script.google.com/macros/s/AKfycbzEC1f4NUh-7EP2C8MP4-yFEOrWsACseXyL7qUG6c3NgJ-Ol5XWhVrjGWo2kDbyrMY/exec';
+  const apiEndpoint = 'https://script.google.com/macros/s/AKfycbx0hbnhKtbENSTCO5qUOj02vcf4qy8Z7LFKXvsYUpbE9p-pg1zF9_n6GRZuMLgRwQk/exec';
   try {
     const response = await fetch(apiEndpoint, {
       method: 'POST',
@@ -181,53 +181,138 @@ ipcMain.handle('verify-login', async (event, payload) => {
   }
 });
 
-// Handle IPC query for system self-updating (downloads latest release setup .exe and runs it)
-ipcMain.handle('trigger-app-update', async (event, { token, version }) => {
-  try {
-    const repoOwner = 'ranroncaro2-art';
-    const repoName = 'ToolMangaPro';
+// Helper to resolve Google Drive file ID from URL
+function getGoogleDriveFileId(url) {
+  if (!url) return null;
+  url = url.trim();
+  const driveRegex = /(?:https?:\/\/)?(?:drive\.google\.com)\/(?:file\/d\/([a-zA-Z0-9_-]+)|open\?id=([a-zA-Z0-9_-]+))/i;
+  const match = url.match(driveRegex);
+  if (match) {
+    return match[1] || match[2];
+  }
+  return null;
+}
+
+// Robust file downloader supporting Google Drive large files warning bypass
+async function downloadFileWithBypass(url, destPath, onProgress) {
+  const fileId = getGoogleDriveFileId(url);
+  
+  let downloadUrl = url;
+  let headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ToolMangaPro-Updater'
+  };
+
+  if (fileId) {
+    const initialUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+    console.log(`[Updater] Requesting initial: ${initialUrl}`);
     
-    // 1. Fetch release details from GitHub API to locate the setup asset
-    let releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/tags/v${version}`;
-    const headers = {
-      'Accept': 'application/vnd.github+json',
-      'User-Agent': 'ToolMangaPro-Updater'
-    };
-    if (token && token.trim() !== '') {
-      headers['Authorization'] = `Bearer ${token.trim()}`;
+    const response = await fetch(initialUrl, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`Google Drive returned status ${response.status}`);
     }
-    
-    console.log(`[Updater] Fetching release metadata for version: v${version} from ${releaseUrl}...`);
-    let releaseRes = await fetch(releaseUrl, { headers });
-    
-    // Fallback: If v3.0.1 tag returns 404, try fetching without the 'v' prefix (3.0.1)
-    if (releaseRes.status === 404) {
-      console.log(`[Updater] Release v${version} not found (404). Trying tag name without 'v' prefix...`);
-      releaseUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/tags/${version}`;
-      console.log(`[Updater] Fetching release metadata for version: ${version} from ${releaseUrl}...`);
-      releaseRes = await fetch(releaseUrl, { headers });
-    }
-    
-    if (!releaseRes.ok) {
-      if (releaseRes.status === 404) {
-        throw new Error(`Không tìm thấy bản phát hành v${version} hoặc ${version} trên GitHub. Vui lòng đảm bảo rằng:
-1. Bạn đã tạo/nháp Release với đúng tag v${version} hoặc ${version} trên GitHub.
-2. File setup .exe đã được đính kèm vào Release đó.
-3. GitHub Token của bạn là chính xác và có quyền 'repo' để đọc kho lưu trữ riêng tư (private repository).`);
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      const htmlText = await response.text();
+      console.log('[Updater] HTML warning page detected. Extracting form fields...');
+      
+      const actionMatch = htmlText.match(/action="([^"]+)"/);
+      const actionUrl = actionMatch ? actionMatch[1] : 'https://drive.usercontent.google.com/download';
+      
+      const params = new URLSearchParams();
+      const inputRegex = /<input type="hidden" name="([^"]+)" value="([^"]+)"/g;
+      let match;
+      while ((match = inputRegex.exec(htmlText)) !== null) {
+        params.append(match[1], match[2]);
       }
-      throw new Error(`GitHub API returned status ${releaseRes.status}: ${releaseRes.statusText}`);
+      
+      if (!params.has('confirm')) {
+        params.append('id', fileId);
+        params.append('export', 'download');
+        params.append('confirm', 't');
+      }
+
+      // Forward cookies
+      const cookieHeaders = response.headers.getSetCookie ? response.headers.getSetCookie() : response.headers.get('set-cookie');
+      if (cookieHeaders && cookieHeaders.length > 0) {
+        const cookieStr = Array.isArray(cookieHeaders) 
+          ? cookieHeaders.map(c => c.split(';')[0]).join('; ') 
+          : cookieHeaders.split(';')[0];
+        headers['Cookie'] = cookieStr;
+      }
+
+      downloadUrl = `${actionUrl}?${params.toString()}`;
+    } else {
+      // It is directly the file!
+      console.log('[Updater] Direct download starting...');
+      await saveStreamToFile(response, destPath, onProgress);
+      return;
     }
-    
-    const releaseData = await releaseRes.json();
-    const assets = releaseData.assets || [];
-    // Find the installer asset that ends with .exe
-    const asset = assets.find(a => a.name.endsWith('.exe'));
-    if (!asset) {
-      throw new Error(`Không tìm thấy file cài đặt (.exe) trong bản phát hành v${version}.`);
+  }
+
+  console.log(`[Updater] Downloading from resolved URL: ${downloadUrl}`);
+  const downloadRes = await fetch(downloadUrl, { headers, redirect: 'follow' });
+  if (!downloadRes.ok) {
+    throw new Error(`Tải file thất bại (Status: ${downloadRes.status})`);
+  }
+
+  await saveStreamToFile(downloadRes, destPath, onProgress);
+}
+
+// Helper to save body stream to file with progress callback
+async function saveStreamToFile(response, destPath, onProgress) {
+  const fileStream = fs.createWriteStream(destPath);
+  const reader = response.body.getReader();
+  const contentLength = Number(response.headers.get('content-length')) || 0;
+  let receivedLength = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    fileStream.write(value);
+    receivedLength += value.length;
+
+    if (contentLength > 0 && onProgress) {
+      const percent = Math.round((receivedLength / contentLength) * 100);
+      onProgress(percent);
     }
-    
-    console.log(`[Updater] Found setup asset: ${asset.name}. Starting download...`);
-    
+  }
+  fileStream.end();
+}
+
+// Handle IPC query to check update version from Google Sheets
+ipcMain.handle('check-app-update', async () => {
+  const apiEndpoint = 'https://script.google.com/macros/s/AKfycbx0hbnhKtbENSTCO5qUOj02vcf4qy8Z7LFKXvsYUpbE9p-pg1zF9_n6GRZuMLgRwQk/exec';
+  try {
+    const response = await fetch(apiEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ action: 'check_update' }),
+      redirect: 'follow'
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `Google API returned status ${response.status}: ${response.statusText}` };
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (err) {
+    console.error('Error checking app update:', err);
+    return { success: false, error: 'Lỗi kết nối máy chủ Google: ' + err.message };
+  }
+});
+
+// Handle IPC query for system self-updating (downloads setup .exe and runs it)
+ipcMain.handle('trigger-app-update', async (event, { url, version }) => {
+  try {
+    if (!url || url.trim() === '') {
+      throw new Error('Đường dẫn tải bản cập nhật không hợp lệ.');
+    }
+
     const tempDir = app.getPath('temp');
     const tempExePath = path.join(tempDir, `ToolMangaPro_Setup_${version}.exe`);
     
@@ -236,38 +321,13 @@ ipcMain.handle('trigger-app-update', async (event, { token, version }) => {
       try { fs.unlinkSync(tempExePath); } catch (_) {}
     }
     
-    // 2. Download setup binary using Node fetch streaming
-    const downloadHeaders = {
-      'Accept': 'application/octet-stream',
-      'User-Agent': 'ToolMangaPro-Updater'
-    };
-    if (token && token.trim() !== '') {
-      downloadHeaders['Authorization'] = `Bearer ${token.trim()}`;
-    }
+    console.log(`[Updater] Starting download for version ${version} to: ${tempExePath}...`);
     
-    const downloadRes = await fetch(asset.url, { headers: downloadHeaders });
-    if (!downloadRes.ok) {
-      throw new Error(`Tải file thất bại (Status: ${downloadRes.status})`);
-    }
-    
-    const fileStream = fs.createWriteStream(tempExePath);
-    const reader = downloadRes.body.getReader();
-    const contentLength = Number(downloadRes.headers.get('content-length')) || 0;
-    let receivedLength = 0;
-    
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      fileStream.write(value);
-      receivedLength += value.length;
-      
-      if (contentLength > 0 && mainWindow) {
-        const percent = Math.round((receivedLength / contentLength) * 100);
+    await downloadFileWithBypass(url, tempExePath, (percent) => {
+      if (mainWindow) {
         mainWindow.webContents.send('update-progress', { status: 'downloading', percent });
       }
-    }
-    fileStream.end();
+    });
     
     console.log('[Updater] Download finished successfully. Path:', tempExePath);
     

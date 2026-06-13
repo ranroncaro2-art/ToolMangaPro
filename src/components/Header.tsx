@@ -3,6 +3,23 @@ import { useProjectStore } from '../store/useProjectStore';
 import { Settings, Save, RefreshCw, Key, Database, Cpu, Download, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import pkg from '../../package.json';
 
+const cleanVersion = (v: string) => {
+  if (!v) return '';
+  return v.trim().toLowerCase().replace(/^v[_-]?/, '');
+};
+
+const isNewerVersion = (current: string, latest: string) => {
+  const cParts = cleanVersion(current).split('.').map(Number);
+  const lParts = cleanVersion(latest).split('.').map(Number);
+  for (let i = 0; i < Math.max(cParts.length, lParts.length); i++) {
+    const c = cParts[i] || 0;
+    const l = lParts[i] || 0;
+    if (l > c) return true;
+    if (l < c) return false;
+  }
+  return false;
+};
+
 export default function Header() {
   const {
     apiConfig,
@@ -22,11 +39,9 @@ export default function Header() {
   const [projectName, setProjectName] = useState(currentProject.name);
   const [isSaving, setIsSaving] = useState(false);
   const [activeConfigTab, setActiveConfigTab] = useState<'provider' | 'image' | 'video' | 'update'>('provider');
-  const [githubToken, setGithubToken] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('github_updater_token') || '' : ''));
-  const [githubBranch, setGithubBranch] = useState(() => (typeof window !== 'undefined' ? localStorage.getItem('github_updater_branch') || 'main' : 'main'));
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [isApplyingUpdate, setIsApplyingUpdate] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; commits: any[] } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string; hasUpdate: boolean } | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<{ status: string; percent: number } | null>(null);
 
@@ -35,50 +50,28 @@ export default function Header() {
     setUpdateError(null);
     setUpdateInfo(null);
     try {
-      const headers: Record<string, string> = {
-        'Accept': 'application/vnd.github+json',
-      };
-      if (githubToken.trim()) {
-        headers['Authorization'] = `Bearer ${githubToken.trim()}`;
+      const electronAPI = (window as any).electronAPI;
+      if (!electronAPI?.checkAppUpdate) {
+        throw new Error("Không thể chạy kiểm tra cập nhật ngoài môi trường ứng dụng (Electron).");
       }
 
-      // Fetch package.json content
-      const pkgUrl = `https://api.github.com/repos/ranroncaro2-art/ToolMangaPro/contents/package.json?ref=${githubBranch}`;
-      const pkgRes = await fetch(pkgUrl, { headers });
-      
-      if (!pkgRes.ok) {
-        throw new Error(`Không thể truy cập file package.json (${pkgRes.status} ${pkgRes.statusText}). Hãy kiểm tra lại Token hoặc tên chi nhánh.`);
+      const res = await electronAPI.checkAppUpdate();
+      if (!res.success) {
+        throw new Error(res.message || res.error || "Không thể lấy thông tin cập nhật từ Google Sheet.");
       }
 
-      const pkgData = await pkgRes.json();
-      if (!pkgData.content) {
-        throw new Error("Không thể đọc được nội dung package.json từ GitHub.");
-      }
-
-      // Decode base64 package.json content
-      const decodedContent = atob(pkgData.content.replace(/\s/g, ''));
-      const parsedPkg = JSON.parse(decodedContent);
-      const latestVersion = parsedPkg.version;
-
-      // Fetch latest commits
-      const commitsUrl = `https://api.github.com/repos/ranroncaro2-art/ToolMangaPro/commits?sha=${githubBranch}&per_page=5`;
-      let commitsList: any[] = [];
-      try {
-        const commitsRes = await fetch(commitsUrl, { headers });
-        if (commitsRes.ok) {
-          commitsList = await commitsRes.json();
-        }
-      } catch (commitsErr) {
-        console.error("Failed to fetch commits list:", commitsErr);
-      }
+      const latestVersion = res.version;
+      const downloadUrl = res.url;
+      const hasUpdate = isNewerVersion(pkg.version, latestVersion);
 
       setUpdateInfo({
         version: latestVersion,
-        commits: Array.isArray(commitsList) ? commitsList : []
+        url: downloadUrl,
+        hasUpdate
       });
     } catch (err: any) {
       console.error(err);
-      setUpdateError(err.message || "Đã xảy ra lỗi khi kết nối với GitHub.");
+      setUpdateError(err.message || "Đã xảy ra lỗi khi kết nối với máy chủ Google.");
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -86,6 +79,10 @@ export default function Header() {
 
   const handleApplyUpdate = async () => {
     if (!updateInfo) return;
+    if (!updateInfo.hasUpdate) {
+      alert("Bạn đang ở phiên bản mới nhất.");
+      return;
+    }
     const confirmMsg = `Bạn có chắc chắn muốn cập nhật hệ thống từ phiên bản ${pkg.version} lên phiên bản ${updateInfo.version}? Quá trình này sẽ tải về và chạy bộ cài đặt ứng dụng mới nhất.`;
     if (!window.confirm(confirmMsg)) return;
 
@@ -102,7 +99,7 @@ export default function Header() {
 
       try {
         const res = await electronAPI.triggerAppUpdate({
-          token: githubToken,
+          url: updateInfo.url,
           version: updateInfo.version
         });
         if (res.success) {
@@ -127,27 +124,8 @@ export default function Header() {
       return;
     }
 
-    // Fallback for browser/dev environments (source code overwrite)
-    try {
-      const res = await fetch('/api/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: githubToken, branch: githubBranch })
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        alert(data.message);
-        setShowSettings(false);
-      } else {
-        throw new Error(data.error || "Cập nhật không thành công.");
-      }
-    } catch (err: any) {
-      console.error(err);
-      setUpdateError(err.message || "Đã xảy ra lỗi trong quá trình ghi đè mã nguồn mới.");
-    } finally {
-      setIsApplyingUpdate(false);
-    }
+    setUpdateError("Môi trường hiện tại không hỗ trợ tải cập nhật ứng dụng.");
+    setIsApplyingUpdate(false);
   };
 
   React.useEffect(() => {
@@ -652,39 +630,11 @@ export default function Header() {
                     Cập nhật hệ thống
                   </div>
 
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Hệ thống sẽ kết nối với máy chủ Google Sheets để kiểm tra phiên bản mới nhất và tải xuống bản cài đặt tự động.
+                  </p>
+
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                        GitHub Token (để trống nếu repo public)
-                      </label>
-                      <input
-                        type="password"
-                        placeholder="ghp_..."
-                        value={githubToken}
-                        onChange={(e) => {
-                          setGithubToken(e.target.value);
-                          localStorage.setItem('github_updater_token', e.target.value);
-                        }}
-                        className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition font-mono"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                        Chi nhánh (Branch)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="main"
-                        value={githubBranch}
-                        onChange={(e) => {
-                          setGithubBranch(e.target.value);
-                          localStorage.setItem('github_updater_branch', e.target.value);
-                        }}
-                        className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition font-mono"
-                      />
-                    </div>
-
                     <div className="pt-2 flex gap-2">
                       <button
                         type="button"
@@ -709,7 +659,7 @@ export default function Header() {
                         <button
                           type="button"
                           onClick={handleApplyUpdate}
-                          disabled={isApplyingUpdate}
+                          disabled={isApplyingUpdate || !updateInfo.hasUpdate}
                           className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold py-2 px-3 rounded-lg text-xs transition disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-violet-500/10"
                         >
                           {isApplyingUpdate ? (
@@ -759,40 +709,20 @@ export default function Header() {
                       </div>
 
                       {updateInfo ? (
-                        <>
-                          <div className="flex justify-between text-xs border-b border-gray-900 pb-2">
-                            <span className="text-gray-500 font-semibold uppercase tracking-wider">Phiên bản mới nhất:</span>
-                            <span className="font-mono font-bold text-emerald-400 flex items-center gap-1.5">
-                              {updateInfo.version}
-                              {updateInfo.version !== pkg.version ? (
-                                <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/40 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider scale-90 animate-pulse">Có cập nhật</span>
-                              ) : (
-                                <span className="bg-slate-900 text-slate-400 border border-slate-800 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider scale-90">Mới nhất</span>
-                              )}
-                            </span>
-                          </div>
-
-                          {updateInfo.commits && updateInfo.commits.length > 0 && (
-                            <div className="space-y-1.5 pt-1">
-                              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Thông tin các thay đổi gần đây:</span>
-                              <div className="max-h-[140px] overflow-y-auto space-y-2 pr-1 scrollbar-thin text-[11px]">
-                                {updateInfo.commits.map((c: any, idx: number) => (
-                                  <div key={idx} className="border-b border-gray-900/50 pb-1.5 last:border-b-0">
-                                    <p className="text-slate-300 leading-normal font-sans font-medium">{c.commit?.message?.split('\n')[0]}</p>
-                                    <div className="flex items-center gap-2 text-[9px] text-slate-500 mt-0.5">
-                                      <span className="font-semibold text-slate-400">{c.commit?.author?.name}</span>
-                                      <span>•</span>
-                                      <span>{c.commit?.author?.date ? new Date(c.commit.author.date).toLocaleDateString('vi-VN') : ''}</span>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </>
+                        <div className="flex justify-between text-xs border-b border-gray-900 pb-2">
+                          <span className="text-gray-500 font-semibold uppercase tracking-wider">Phiên bản mới nhất:</span>
+                          <span className="font-mono font-bold text-emerald-400 flex items-center gap-1.5">
+                            {updateInfo.version}
+                            {updateInfo.hasUpdate ? (
+                              <span className="bg-emerald-950 text-emerald-400 border border-emerald-900/40 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider scale-90 animate-pulse">Có cập nhật</span>
+                            ) : (
+                              <span className="bg-slate-900 text-slate-400 border border-slate-800 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider scale-90">Mới nhất</span>
+                            )}
+                          </span>
+                        </div>
                       ) : (
                         <div className="text-[10.5px] text-slate-500 text-center py-2 italic">
-                          Nhấp "Kiểm tra phiên bản" để quét cập nhật từ GitHub.
+                          Nhấp "Kiểm tra phiên bản" để quét cập nhật từ Google Sheet.
                         </div>
                       )}
                     </div>
