@@ -5,9 +5,10 @@ export interface AIConfig {
   apiKey: string;
   modelName: string;
   projectId?: string;
-  type?: 'mapping' | 'prompts' | 'general';
+  type?: 'mapping' | 'prompts' | 'general' | string;
   label?: string;
   googleApiUrl?: string;
+  signal?: AbortSignal;
 }
 
 export interface TokenUsage {

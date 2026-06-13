@@ -15,6 +15,9 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
     isGeneratingImagePrompts,
     generateFullCombo,
     isGeneratingAssets,
+    cancelSceneMapping,
+    cancelImagePrompts,
+    cancelFullCombo,
     targetDuration,
     setTargetDuration,
     styles = [],
@@ -308,23 +311,34 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
             </p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => handleGenerate(false)}
-              disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-              className="flex-1 bg-violet-650 hover:bg-violet-555 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-violet-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
-            >
-              {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
-            </button>
-            {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
+            {isGeneratingSceneMapping ? (
               <button
-                onClick={() => handleGenerate(true)}
-                disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-                className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-violet-400 hover:text-violet-300 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
-                title="Tiếp tục phân tích các subtitle chưa được mapping"
+                onClick={cancelSceneMapping}
+                className="flex-1 bg-rose-650 hover:bg-rose-555 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-rose-600/40 cursor-pointer transition duration-200 text-center font-bold"
               >
-                <Play className="w-2.5 h-2.5 fill-current" />
-                Tạo tiếp
+                Dừng lại
               </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleGenerate(false)}
+                  disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                  className="flex-1 bg-violet-650 hover:bg-violet-555 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-violet-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
+                >
+                  {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
+                </button>
+                {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
+                  <button
+                    onClick={() => handleGenerate(true)}
+                    disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                    className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-violet-400 hover:text-violet-300 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
+                    title="Tiếp tục phân tích các subtitle chưa được mapping"
+                  >
+                    <Play className="w-2.5 h-2.5 fill-current" />
+                    Tạo tiếp
+                  </button>
+                )}
+              </>
             )}
           </div>
           {isGeneratingSceneMapping && (
@@ -347,23 +361,34 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
             </p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => handleGenerateAll(false)}
-              disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-              className="flex-1 bg-fuchsia-650 hover:bg-fuchsia-555 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-fuchsia-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
-            >
-              {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
-            </button>
-            {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
+            {isGeneratingImagePrompts ? (
               <button
-                onClick={() => handleGenerateAll(true)}
-                disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-                className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-fuchsia-400 hover:text-fuchsia-300 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
-                title="Tiếp tục tạo phân cảnh và prompts chưa có"
+                onClick={cancelImagePrompts}
+                className="flex-1 bg-rose-650 hover:bg-rose-555 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-rose-600/40 cursor-pointer transition duration-200 text-center font-bold"
               >
-                <Play className="w-2.5 h-2.5 fill-current" />
-                Tạo tiếp
+                Dừng lại
               </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleGenerateAll(false)}
+                  disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                  className="flex-1 bg-fuchsia-650 hover:bg-fuchsia-555 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-fuchsia-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
+                >
+                  {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
+                </button>
+                {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
+                  <button
+                    onClick={() => handleGenerateAll(true)}
+                    disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                    className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-fuchsia-400 hover:text-fuchsia-300 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
+                    title="Tiếp tục tạo phân cảnh và prompts chưa có"
+                  >
+                    <Play className="w-2.5 h-2.5 fill-current" />
+                    Tạo tiếp
+                  </button>
+                )}
+              </>
             )}
           </div>
           {isGeneratingImagePrompts && (
@@ -386,23 +411,34 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
             </p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => handleGenerateFullCombo(false)}
-              disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-              className="flex-1 bg-white/10 hover:bg-white/20 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
-            >
-              {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
-            </button>
-            {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
+            {(isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets) ? (
               <button
-                onClick={() => handleGenerateFullCombo(true)}
-                disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-                className="flex-1 bg-white/20 hover:bg-white/30 border border-white/10 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
-                title="Tiếp tục chạy combo cho các phần chưa hoàn thành"
+                onClick={cancelFullCombo}
+                className="flex-1 bg-rose-650 hover:bg-rose-555 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-rose-600/40 cursor-pointer transition duration-200 text-center font-bold"
               >
-                <Play className="w-2.5 h-2.5 fill-current" />
-                Tạo tiếp
+                Dừng lại
               </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleGenerateFullCombo(false)}
+                  disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                  className="flex-1 bg-white/10 hover:bg-white/20 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
+                >
+                  {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
+                </button>
+                {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
+                  <button
+                    onClick={() => handleGenerateFullCombo(true)}
+                    disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                    className="flex-1 bg-white/20 hover:bg-white/30 border border-white/10 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
+                    title="Tiếp tục chạy combo cho các phần chưa hoàn thành"
+                  >
+                    <Play className="w-2.5 h-2.5 fill-current" />
+                    Tạo tiếp
+                  </button>
+                )}
+              </>
             )}
           </div>
           {isGeneratingAssets && (

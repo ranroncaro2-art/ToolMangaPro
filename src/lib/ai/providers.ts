@@ -187,7 +187,8 @@ async function callProxy(
   responseFormat?: string,
   projectId?: string,
   type?: string,
-  label?: string
+  label?: string,
+  signal?: AbortSignal
 ): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number; cost: number } }> {
   const maxRetries = 3;
   let delay = 2000;
@@ -209,7 +210,8 @@ async function callProxy(
           projectId,
           type,
           label
-        })
+        }),
+        signal
       });
 
       if (!res.ok) {
@@ -254,14 +256,20 @@ To maintain visual consistency and story continuity, you must respect the existi
 4. Previous Plot: Use the recent plot summary to maintain story continuity.
 5. Subtitle Range Continuity: Subtitle ranges must be strictly consecutive and non-overlapping. For example, if a scene ends at subtitle index 15, the next scene MUST start at subtitle index 16. Do NOT overlap subtitle indices between scenes (e.g., scene A: 1-15, scene B: 15-20 is INVALID. It must be scene A: 1-15, scene B: 16-20).
 
-[CHARACTER VARIATION RULES]:
-For MAIN characters only, you must detect if the context requires a visual variation (change in outfit/clothing based on location/event, or change in age/time like flashback/younger version):
-1. Detect changes in location or activities where their clothing should change (e.g., at home, office/work, sport, party/formal events).
-2. Detect changes in time (e.g., past memories, flashbacks) where their age/generation should change.
-3. Naming convention for variants: [base_character_id]_[variant] (all lowercase, e.g., 'kudo_home', 'kudo_office', 'kudo_sport', 'kudo_young').
-4. Registration: If the variant is not in 'knownCharacters', you must list it in 'newCharacters' as a new entry. In its prompt description, specify the unique outfit or age for this variant (e.g., "Kudo at home wearing casual, comfortable home clothing", "Kudo as a younger version wearing a student uniform").
-5. Application: In the 'scenes' list, use the exact variant ID (e.g., 'kudo_home') in the 'characters' field for that scene.
-6. Do not create variants for minor characters or background extras; only apply this to main characters.
+[CHARACTER NAMING & VARIATION RULES (TWO-LAYER SYSTEM)]:
+1. LAYER 1 (Base Name Extraction from Dialogues & Context):
+   - Identify Speaker Names: Subtitles often contain speaker prefixes at the start of dialogue lines, such as a name followed by a colon and Japanese quotes (e.g., "桃花：「わかりました」" or "田中：「いいよ」"). You must recognize these prefixes (e.g., "桃花", "田中") as the exact names of the characters.
+   - Contextual Romanization: Transcribe and romanize these names accurately according to the story's culture and language. For Japanese names, use correct Japanese Romaji pronunciation (e.g., "桃花" -> "momoka", "田中" -> "tanaka"), NOT Chinese Pinyin (e.g., do not use "taohua") or generic English names, unless the story context specifically suggests a different nationality.
+2. LAYER 2 (Variant Detection & Composition):
+   - For MAIN characters only, you must detect if the context requires a visual variation (change in outfit/clothing based on location/event, or change in age/time like flashbacks or time jumps, e.g. 5 years later):
+     + Detect changes in location or activities (e.g., at home, office/work, sport, party/formal events).
+     + Detect changes in time or age (e.g., past memories, flashbacks, time jumps like "5 years later").
+     + Naming convention: Combine the lowercase Romanized base name with the variant suffix, formatted as [base_character_id]_[variant] (all lowercase, e.g., 'momoka_home', 'momoka_5yearslater', 'tanaka_office', 'kudo_young').
+3. Registration & Application:
+   - If the combined variant ID is not in 'knownCharacters', you must list it in 'newCharacters' as a new entry. In its prompt description, specify the unique outfit, age, or time jump for this variant (e.g., "Momoka at home wearing casual, comfortable home clothing", "Momoka 5 years later, looking more mature").
+   - In the 'scenes' list, use the exact variant ID (e.g., 'momoka_home') in the 'characters' field for that scene.
+   - Do not create variants for minor characters or background extras; only apply this to main characters.
+
 
 [GUIDELINE FOR NEW CHARACTERS]:
 For each new character, generate a prompt matching EXACTLY this format (replace [Name] and [detailed physical description]):
@@ -378,7 +386,8 @@ ${srtChunkContent}`;
       'json',
       config.projectId,
       config.type,
-      config.label
+      config.label,
+      config.signal
     );
 
     const parsed = cleanAndParseJson<any>(response.text);
@@ -421,7 +430,8 @@ ${JSON.stringify(scenes, null, 2)}`;
       'json',
       config.projectId,
       config.type,
-      config.label
+      config.label,
+      config.signal
     );
 
     const parsed = cleanAndParseJson<any>(response.text);
@@ -470,7 +480,8 @@ ${srtChunkContent}`;
       'json',
       config.projectId,
       config.type,
-      config.label
+      config.label,
+      config.signal
     );
 
     const parsed = cleanAndParseJson<any>(response.text);
@@ -513,7 +524,8 @@ ${JSON.stringify(scenes, null, 2)}`;
       'json',
       config.projectId,
       config.type,
-      config.label
+      config.label,
+      config.signal
     );
 
     const parsed = cleanAndParseJson<any>(response.text);
@@ -562,7 +574,8 @@ ${srtChunkContent}`;
       'text',
       config.projectId,
       config.type,
-      config.label
+      config.label,
+      config.signal
     );
 
     const parsed = cleanAndParseJson<any>(response.text);
@@ -605,7 +618,8 @@ ${JSON.stringify(scenes, null, 2)}`;
       'text',
       config.projectId,
       config.type,
-      config.label
+      config.label,
+      config.signal
     );
 
     const parsed = cleanAndParseJson<any>(response.text);

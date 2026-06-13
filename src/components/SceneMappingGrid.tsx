@@ -14,6 +14,7 @@ export default function SceneMappingGrid({ onNextTab }: { onNextTab: () => void 
     splitScene,
     generateImagePrompts,
     isGeneratingImagePrompts,
+    cancelImagePrompts,
     batchStatus,
     textLogs = [],
     textQueue = [],
@@ -234,14 +235,23 @@ export default function SceneMappingGrid({ onNextTab }: { onNextTab: () => void 
           </button>
         </div>
 
-        <button
-          onClick={handleGenerateImagePrompts}
-          disabled={isGeneratingImagePrompts || currentProject.sceneMapping.length === 0}
-          className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-gray-850 disabled:to-gray-900 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 active:scale-98 transition cursor-pointer"
-        >
-          <Sparkles className="w-4 h-4" />
-          {isGeneratingImagePrompts ? 'Generating Prompts...' : 'Generate Image Prompts'}
-        </button>
+        {isGeneratingImagePrompts ? (
+          <button
+            onClick={cancelImagePrompts}
+            className="flex items-center gap-2 bg-rose-650 hover:bg-rose-555 text-white font-semibold text-xs px-4 py-2.5 rounded shadow-lg shadow-rose-500/10 active:scale-98 transition cursor-pointer font-bold animate-pulse-soft"
+          >
+            Dừng lại
+          </button>
+        ) : (
+          <button
+            onClick={handleGenerateImagePrompts}
+            disabled={currentProject.sceneMapping.length === 0}
+            className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-gray-850 disabled:to-gray-900 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 active:scale-98 transition cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            Generate Image Prompts
+          </button>
+        )}
       </div>
 
       {/* Loading Batch Status */}

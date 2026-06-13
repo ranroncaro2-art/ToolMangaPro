@@ -625,6 +625,11 @@ interface ProjectState {
   assetAbortController: AbortController | null;
   cancelAssetGeneration: () => void;
   assetGeneratingIds: string[];
+  mappingAbortController: AbortController | null;
+  cancelSceneMapping: () => void;
+  promptsAbortController: AbortController | null;
+  cancelImagePrompts: () => void;
+  cancelFullCombo: () => void;
   batchStatus: string;
   runningProjects: Record<string, 'mapping' | 'prompts' | 'mapping_queued' | 'prompts_queued'>;
   tokenUsage: {
@@ -746,17 +751,20 @@ Nếu nhiều subtitle chỉ là cuộc trò chuyện liên tục trong cùng b�
 8. Character Name Consistency (THỐNG NHẤT TÊN NHÂN VẬT)
 - Tên nhân vật được ghi nhận trong trường "characters" và nội dung trong trường "sceneDescription" hay "mainSituation" phải khớp nhau.
 - Ví dụ: Nếu trong mô tả cảnh hoặc tình huống nhắc đến "Kenji" và "Aoi" thì trường "characters" phải ghi nhận chính xác: "Kenji, Aoi" (phân tách bằng dấu phẩy).
+- PHÂN TÍCH GỢI Ý TÊN TỪ LỜI THOẠI & NGỮ CẢNH (LAYER 1 - BASE NAME):
+  + Nếu trong phụ đề (SRT) xuất hiện lời thoại dạng có tên người nói trước dấu hai chấm và dấu ngoặc (Ví dụ: 桃花：「わかりました」, 田中：「いいよ」), bạn phải hiểu rằng "桃花" và "田中" là tên của nhân vật đang nói.
+  + Hãy trích xuất và sử dụng chính xác các tên nhân vật này. Nếu câu chuyện viết bằng tiếng Nhật hoặc bối cảnh Nhật Bản, hãy phiên âm Latin (Romaji) chính xác theo tiếng Nhật (ví dụ: "桃花" -> "momoka", "田中" -> "tanaka"). Tránh việc phiên âm sai sang tiếng Trung (như "taohua") hoặc đặt tên tiếng Anh ngẫu nhiên, hoặc dùng các từ chung chung như "cô gái", "chàng trai" khi đã có tên rõ ràng.
 
 9. Strict Subtitle Ranges (CÁC PHẠM VI PHỤ ĐỀ KHÔNG TRÙNG LẶP)
 - Các phạm vi phụ đề phải nối tiếp nhau và KHÔNG ĐƯỢC TRÙNG LẶP. Ví dụ, nếu cảnh trước kết thúc ở phụ đề số 15, thì cảnh sau BẮT BUỘC phải bắt đầu từ phụ đề số 16 (Ví dụ Cảnh 1: '1-15', Cảnh 2: '16-20'). Tuyệt đối không lấy lại số phụ đề đã dùng (không viết Cảnh 2: '15-20' nếu Cảnh 1 là '1-15').
 
-10. Character Variation Rules (TẠO BIẾN THỂ NHÂN VẬT THEO BỐI CẢNH VÀ THỜI GIAN)
+10. Character Variation Rules (TẠO BIẾN THỂ NHÂN VẬT THEO BỐI CẢNH VÀ THỜI GIAN - LAYER 2 - VARIANT)
 - Chỉ áp dụng quy tắc này cho các NHÂN VẬT CHÍNH (main characters). Không áp dụng cho nhân vật phụ hoặc quần chúng (extras/background characters).
 - Nhận diện bối cảnh, mốc thời gian hoặc tình huống trong truyện để tự động tạo và sử dụng các biến thể nhân vật phù hợp:
-  + Biến thể theo thời gian/tuổi tác: Nếu câu chuyện kể về quá khứ, hồi tưởng, phiên bản thời trẻ (flashback/younger version), hãy tạo biến thể trẻ tuổi. Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'kudo_young').
-  + Biến thể theo địa điểm/hoạt động: Nếu nhân vật chính thay đổi trang phục cho phù hợp với môi trường (ở nhà, đi làm, chơi thể thao, dự tiệc...), hãy tạo biến thể tương ứng. Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'kudo_home', 'kudo_office', 'kudo_sport', 'kudo_party').
-- Đăng ký biến thể: Các biến thể này phải được xem như nhân vật mới và khai báo trong danh sách "newCharacters" (nếu chưa có trong danh sách nhân vật đã biết 'knownCharacters'). Trong phần prompt của biến thể mới đó, mô tả rõ trang phục hoặc độ tuổi đặc trưng (ví dụ: "Character Sheet of kudo_home, ... wearing casual, comfortable home clothing", "Character Sheet of kudo_young, ... as a younger version").
-- Áp dụng trong cảnh: Trong trường "characters" của mỗi cảnh, điền chính xác ID của biến thể được dùng (ví dụ: "kudo_home" hoặc "kudo_young" thay vì tên gốc "kudo").
+  + Kết hợp Tên Gốc (Layer 1) với biến thể: Sau khi xác định tên gốc (ví dụ: "momoka"), nếu có sự thay đổi trang phục (ở nhà, đi làm, chơi thể thao...) hoặc mốc thời gian (hồi tưởng quá khứ, sau 5 năm '5yearslater'...), hãy tạo biến thể tương ứng.
+  + Định dạng tên ghép: Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'momoka_home', 'momoka_5yearslater', 'tanaka_office').
+- Đăng ký biến thể: Các biến thể này phải được xem như nhân vật mới và khai báo trong danh sách "newCharacters" (nếu chưa có trong danh sách nhân vật đã biết 'knownCharacters'). Trong phần prompt của biến thể mới đó, mô tả rõ trang phục hoặc độ tuổi/mốc thời gian đặc trưng (ví dụ: "Character Sheet of momoka_home, ... wearing casual, comfortable home clothing", "Character Sheet of momoka_5yearslater, ... 5 years later, looking more mature").
+- Áp dụng trong cảnh: Trong trường "characters" của mỗi cảnh, điền chính xác ID của biến thể được dùng (ví dụ: "momoka_home" hoặc "momoka_5yearslater" thay vì tên gốc "momoka").
 
 OUTPUT FORMAT:
 Phải trả về kết quả dưới dạng một mảng JSON (JSON array), trong đó mỗi phần tử có cấu trúc chính xác như sau:
@@ -1075,8 +1083,12 @@ async function executeSceneMappingIncrementalFlow(
   }
 
   const totalChunks = Math.ceil(subtitleBlocks.length / srtChunkSize);
+  const signal = get().mappingAbortController?.signal;
 
   for (let i = startIndex; i < subtitleBlocks.length; i += srtChunkSize) {
+    if (signal?.aborted) {
+      throw new Error('stopped');
+    }
     const chunkIndex = Math.floor(i / srtChunkSize) + 1;
     
     // Update batch status in the UI store
@@ -1095,7 +1107,8 @@ async function executeSceneMappingIncrementalFlow(
       modelName,
       projectId: projId,
       type: 'mapping' as const,
-      label: `Phần ${chunkIndex}/${totalChunks}`
+      label: `Phần ${chunkIndex}/${totalChunks}`,
+      signal
     };
 
     const response = await providerInstance.generateSceneMappingIncremental(
@@ -1305,6 +1318,7 @@ async function executeImagePromptsContextualFlow(
   }
 
   const totalBatches = Math.ceil(sceneMapping.length / batchSize);
+  const signal = get().promptsAbortController?.signal;
 
   const finalImagePromptPrompt = `${imagePromptPrompt}
         
@@ -1313,6 +1327,9 @@ async function executeImagePromptsContextualFlow(
 - Hãy bỏ qua yêu cầu mô tả phong cách Anime Manga ở mục 6.`;
 
   for (let i = startIndex; i < sceneMapping.length; i += batchSize) {
+    if (signal?.aborted) {
+      throw new Error('stopped');
+    }
     const batchIndex = Math.floor(i / batchSize) + 1;
     if (get().currentProject.id === projId) {
       set({
@@ -1392,7 +1409,8 @@ async function executeImagePromptsContextualFlow(
       modelName,
       projectId: projId,
       type: 'prompts' as const,
-      label: `Phần ${batchIndex}/${totalBatches}`
+      label: `Phần ${batchIndex}/${totalBatches}`,
+      signal
     };
 
     const response = await providerInstance.generateImagePromptsContextual(
@@ -1601,7 +1619,46 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       localStorage.setItem('ms_modelName', 'gemini-2.5-flash');
     }
 
-    const scenePrompt = localStorage.getItem('ms_scenePrompt') || DEFAULT_SCENE_MAPPING_PROMPT;
+    let scenePrompt = localStorage.getItem('ms_scenePrompt') || DEFAULT_SCENE_MAPPING_PROMPT;
+    const rawScenePrompt = localStorage.getItem('ms_scenePrompt');
+    if (rawScenePrompt && rawScenePrompt.includes('8. Character Name Consistency') && !rawScenePrompt.includes('桃花：「わかりました」')) {
+      const oldRule8 = `8. Character Name Consistency (THỐNG NHẤT TÊN NHÂN VẬT)
+- Tên nhân vật được ghi nhận trong trường "characters" và nội dung trong trường "sceneDescription" hay "mainSituation" phải khớp nhau.
+- Ví dụ: Nếu trong mô tả cảnh hoặc tình huống nhắc đến "Kenji" và "Aoi" thì trường "characters" phải ghi nhận chính xác: "Kenji, Aoi" (phân tách bằng dấu phẩy).`;
+      
+      const newRule8 = `8. Character Name Consistency (THỐNG NHẤT TÊN NHÂN VẬT)
+- Tên nhân vật được ghi nhận trong trường "characters" và nội dung trong trường "sceneDescription" hay "mainSituation" phải khớp nhau.
+- Ví dụ: Nếu trong mô tả cảnh hoặc tình huống nhắc đến "Kenji" và "Aoi" thì trường "characters" phải ghi nhận chính xác: "Kenji, Aoi" (phân tách bằng dấu phẩy).
+- PHÂN TÍCH GỢI Ý TÊN TỪ LỜI THOẠI & NGỮ CẢNH (LAYER 1 - BASE NAME):
+  + Nếu trong phụ đề (SRT) xuất hiện lời thoại dạng có tên người nói trước dấu hai chấm và dấu ngoặc (Ví dụ: 桃花：「わかりました」, 田中：「いいよ」), bạn phải hiểu rằng "桃花" và "田中" là tên của nhân vật đang nói.
+  + Hãy trích xuất và sử dụng chính xác các tên nhân vật này. Nếu câu chuyện viết bằng tiếng Nhật hoặc bối cảnh Nhật Bản, hãy phiên âm Latin (Romaji) chính xác theo tiếng Nhật (ví dụ: "桃花" -> "momoka", "田中" -> "tanaka"). Tránh việc phiên âm sai sang tiếng Trung (như "taohua") hoặc đặt tên tiếng Anh ngẫu nhiên, hoặc dùng các từ chung chung như "cô gái", "chàng trai" khi đã có tên rõ ràng.`;
+
+      const oldRule10 = `10. Character Variation Rules (TẠO BIẾN THỂ NHÂN VẬT THEO BỐI CẢNH VÀ THỜI GIAN)
+- Chỉ áp dụng quy tắc này cho các NHÂN VẬT CHÍNH (main characters). Không áp dụng cho nhân vật phụ hoặc quần chúng (extras/background characters).
+- Nhận diện bối cảnh, mốc thời gian hoặc tình huống trong truyện để tự động tạo và sử dụng các biến thể nhân vật phù hợp:
+  + Biến thể theo thời gian/tuổi tác: Nếu câu chuyện kể về quá khứ, hồi tưởng, phiên bản thời trẻ (flashback/younger version), hãy tạo biến thể trẻ tuổi. Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'kudo_young').
+  + Biến thể theo địa điểm/hoạt động: Nếu nhân vật chính thay đổi trang phục cho phù hợp với môi trường (ở nhà, đi làm, chơi thể thao, dự tiệc...), hãy tạo biến thể tương ứng. Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'kudo_home', 'kudo_office', 'kudo_sport', 'kudo_party').
+- Đăng ký biến thể: Các biến thể này phải được xem như nhân vật mới và khai báo trong danh sách "newCharacters" (nếu chưa có trong danh sách nhân vật đã biết 'knownCharacters'). Trong phần prompt của biến thể mới đó, mô tả rõ trang phục hoặc độ tuổi đặc trưng (ví dụ: "Character Sheet of kudo_home, ... wearing casual, comfortable home clothing", "Character Sheet of kudo_young, ... as a younger version").
+- Áp dụng trong cảnh: Trong trường "characters" của mỗi cảnh, điền chính xác ID của biến thể được dùng (ví dụ: "kudo_home" hoặc "kudo_young" thay vì tên gốc "kudo").`;
+
+      const newRule10 = `10. Character Variation Rules (TẠO BIẾN THỂ NHÂN VẬT THEO BỐI CẢNH VÀ THỜI GIAN - LAYER 2 - VARIANT)
+- Chỉ áp dụng quy tắc này cho các NHÂN VẬT CHÍNH (main characters). Không áp dụng cho nhân vật phụ hoặc quần chúng (extras/background characters).
+- Nhận diện bối cảnh, mốc thời gian hoặc tình huống trong truyện để tự động tạo và sử dụng các biến thể nhân vật phù hợp:
+  + Kết hợp Tên Gốc (Layer 1) với biến thể: Sau khi xác định tên gốc (ví dụ: "momoka"), nếu có sự thay đổi trang phục (ở nhà, đi làm, chơi thể thao...) hoặc mốc thời gian (hồi tưởng quá khứ, sau 5 năm '5yearslater'...), hãy tạo biến thể tương ứng.
+  + Định dạng tên ghép: Đặt tên dạng: [tên_nhân_vật_gốc]_[biến_thể] (tất cả viết thường, ví dụ: 'momoka_home', 'momoka_5yearslater', 'tanaka_office').
+- Đăng ký biến thể: Các biến thể này phải được xem như nhân vật mới và khai báo trong danh sách "newCharacters" (nếu chưa có trong danh sách nhân vật đã biết 'knownCharacters'). Trong phần prompt của biến thể mới đó, mô tả rõ trang phục hoặc độ tuổi/mốc thời gian đặc trưng (ví dụ: "Character Sheet of momoka_home, ... wearing casual, comfortable home clothing", "Character Sheet of momoka_5yearslater, ... 5 years later, looking more mature").
+- Áp dụng trong cảnh: Trong trường "characters" của mỗi cảnh, điền chính xác ID của biến thể được dùng (ví dụ: "momoka_home" hoặc "momoka_5yearslater" thay vì tên gốc "momoka").`;
+
+      let migrated = rawScenePrompt;
+      if (migrated.includes(oldRule8)) {
+        migrated = migrated.replace(oldRule8, newRule8);
+      }
+      if (migrated.includes(oldRule10)) {
+        migrated = migrated.replace(oldRule10, newRule10);
+      }
+      localStorage.setItem('ms_scenePrompt', migrated);
+      scenePrompt = migrated;
+    }
     const imagePrompt = localStorage.getItem('ms_imagePrompt') || DEFAULT_IMAGE_PROMPT_PROMPT;
     const targetDuration = Number(localStorage.getItem('ms_targetDuration') || '25');
     
@@ -3334,6 +3391,52 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
   },
   assetGeneratingIds: [],
+  mappingAbortController: null as AbortController | null,
+  cancelSceneMapping: () => {
+    const controller = get().mappingAbortController;
+    if (controller) {
+      controller.abort();
+    }
+    set({
+      mappingAbortController: null,
+      isGeneratingSceneMapping: false,
+      batchStatus: 'Scene mapping cancelled.'
+    });
+    const active = get().currentProject;
+    if (active.id) {
+      set((state) => {
+        const updatedRunning = { ...state.runningProjects };
+        delete updatedRunning[active.id!];
+        return { runningProjects: updatedRunning };
+      });
+    }
+  },
+  promptsAbortController: null as AbortController | null,
+  cancelImagePrompts: () => {
+    const controller = get().promptsAbortController;
+    if (controller) {
+      controller.abort();
+    }
+    set({
+      promptsAbortController: null,
+      isGeneratingImagePrompts: false,
+      batchStatus: 'Image prompt generation cancelled.'
+    });
+    const active = get().currentProject;
+    if (active.id) {
+      set((state) => {
+        const updatedRunning = { ...state.runningProjects };
+        delete updatedRunning[active.id!];
+        return { runningProjects: updatedRunning };
+      });
+    }
+  },
+  cancelFullCombo: () => {
+    get().cancelSceneMapping();
+    get().cancelImagePrompts();
+    get().cancelAssetGeneration();
+    set({ batchStatus: 'Full combo cancelled.' });
+  },
   batchStatus: '',
   runningProjects: {},
   tokenUsage: {
@@ -3408,6 +3511,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { provider, apiKey, modelName } = get().apiConfig;
     if (!apiKey) throw new Error('Please enter your API Key in settings.');
 
+    set({ mappingAbortController: new AbortController() });
+
     const runTask = async () => {
       set((state) => ({
         runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
@@ -3427,13 +3532,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           resume
         );
         await get().loadHistory();
+      } catch (err: any) {
+        if (err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('stopped')) {
+          console.warn('Scene mapping generation aborted.');
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đã dừng tạo phân cảnh.' });
+          }
+        } else {
+          throw err;
+        }
       } finally {
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
           delete updatedRunning[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingSceneMapping: get().currentProject.id === projId ? false : state.isGeneratingSceneMapping
+            isGeneratingSceneMapping: get().currentProject.id === projId ? false : state.isGeneratingSceneMapping,
+            mappingAbortController: null
           };
         });
       }
@@ -3459,6 +3574,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { provider, apiKey, modelName } = get().apiConfig;
     if (!apiKey) throw new Error('Please enter your API Key in settings.');
 
+    set({ promptsAbortController: new AbortController() });
+
     const runTask = async () => {
       set((state) => ({
         runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
@@ -3480,16 +3597,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           set({ batchStatus: 'Generation complete!' });
         }
         await get().loadHistory();
-      } catch (error) {
-        console.error('Error generating image prompts:', error);
-        throw error;
+      } catch (error: any) {
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped')) {
+          console.warn('Image prompt generation aborted.');
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đã dừng tạo prompts.' });
+          }
+        } else {
+          console.error('Error generating image prompts:', error);
+          throw error;
+        }
       } finally {
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
           delete updatedRunning[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingImagePrompts: get().currentProject.id === projId ? false : state.isGeneratingImagePrompts
+            isGeneratingImagePrompts: get().currentProject.id === projId ? false : state.isGeneratingImagePrompts,
+            promptsAbortController: null
           };
         });
       }
@@ -3512,6 +3637,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!srtContent) throw new Error('Please upload an SRT file first.');
     const { provider, apiKey, modelName } = get().apiConfig;
     if (!apiKey) throw new Error('Please enter your API Key in settings.');
+
+    set({
+      mappingAbortController: new AbortController(),
+      promptsAbortController: new AbortController()
+    });
 
     const runTask = async () => {
       // 1. Scene Mapping
@@ -3556,9 +3686,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
         await get().loadHistory();
 
-      } catch (error) {
-        console.error('Error generating all mappings and prompts:', error);
-        throw error;
+      } catch (error: any) {
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped')) {
+          console.warn('All mapping & prompts generation aborted.');
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đã dừng tiến trình.' });
+          }
+        } else {
+          console.error('Error generating all mappings and prompts:', error);
+          throw error;
+        }
       } finally {
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
@@ -3566,7 +3703,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           return {
             runningProjects: updatedRunning,
             isGeneratingSceneMapping: false,
-            isGeneratingImagePrompts: false
+            isGeneratingImagePrompts: false,
+            mappingAbortController: null,
+            promptsAbortController: null
           };
         });
       }
@@ -3591,6 +3730,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!srtContent) throw new Error('Please upload an SRT file first.');
     const { provider, apiKey, modelName } = get().apiConfig;
     if (!apiKey) throw new Error('Please enter your API Key in settings.');
+
+    set({
+      mappingAbortController: new AbortController(),
+      promptsAbortController: new AbortController(),
+      assetAbortController: new AbortController()
+    });
 
     const runTask = async () => {
       // 1. Scene Mapping
@@ -3676,9 +3821,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
         await get().loadHistory();
 
-      } catch (error) {
-        console.error('Error executing full combo mapping, prompts, assets and shots:', error);
-        throw error;
+      } catch (error: any) {
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped')) {
+          console.warn('Full combo generation aborted.');
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đã dừng tiến trình Full combo.' });
+          }
+        } else {
+          console.error('Error executing full combo mapping, prompts, assets and shots:', error);
+          throw error;
+        }
       } finally {
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
@@ -3687,7 +3839,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             runningProjects: updatedRunning,
             isGeneratingSceneMapping: false,
             isGeneratingImagePrompts: false,
-            isGeneratingAssets: false
+            isGeneratingAssets: false,
+            mappingAbortController: null,
+            promptsAbortController: null,
+            assetAbortController: null
           };
         });
       }
