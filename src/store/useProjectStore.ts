@@ -622,6 +622,9 @@ interface ProjectState {
   isGeneratingSceneMapping: boolean;
   isGeneratingImagePrompts: boolean;
   isGeneratingAssets: boolean;
+  isGeneratingCombo1: boolean;
+  isGeneratingCombo2: boolean;
+  isGeneratingFullCombo: boolean;
   assetAbortController: AbortController | null;
   cancelAssetGeneration: () => void;
   assetGeneratingIds: string[];
@@ -629,6 +632,8 @@ interface ProjectState {
   cancelSceneMapping: () => void;
   promptsAbortController: AbortController | null;
   cancelImagePrompts: () => void;
+  cancelCombo1: () => void;
+  cancelCombo2: () => void;
   cancelFullCombo: () => void;
   batchStatus: string;
   runningProjects: Record<string, 'mapping' | 'prompts' | 'mapping_queued' | 'prompts_queued'>;
@@ -647,6 +652,7 @@ interface ProjectState {
   generateSceneMapping: (resume?: boolean) => Promise<void>;
   generateImagePrompts: (resume?: boolean) => Promise<void>;
   generateAllMappingAndPrompts: (resume?: boolean) => Promise<void>;
+  generateCombo2: (resume?: boolean) => Promise<void>;
   generateAllShotImages: () => Promise<void>;
   generateFullCombo: (resume?: boolean) => Promise<void>;
   generateAssetImage: (type: 'character' | 'exterior' | 'prop', id: string, config?: { model?: string; aspect_ratio?: string; count?: number }) => Promise<void>;
@@ -3374,6 +3380,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isGeneratingSceneMapping: false,
   isGeneratingImagePrompts: false,
   isGeneratingAssets: false,
+  isGeneratingCombo1: false,
+  isGeneratingCombo2: false,
+  isGeneratingFullCombo: false,
   assetAbortController: null as AbortController | null,
   cancelAssetGeneration: () => {
     const controller = get().assetAbortController;
@@ -3431,11 +3440,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
   },
+  cancelCombo1: () => {
+    get().cancelSceneMapping();
+    get().cancelImagePrompts();
+    set({
+      isGeneratingCombo1: false,
+      batchStatus: 'Đã hủy Combo 1.'
+    });
+  },
+  cancelCombo2: () => {
+    get().cancelSceneMapping();
+    get().cancelImagePrompts();
+    get().cancelAssetGeneration();
+    set({
+      isGeneratingCombo2: false,
+      batchStatus: 'Đã hủy Combo 2.'
+    });
+  },
   cancelFullCombo: () => {
     get().cancelSceneMapping();
     get().cancelImagePrompts();
     get().cancelAssetGeneration();
-    set({ batchStatus: 'Full combo cancelled.' });
+    const active = get().currentProject;
+    if (active.id) {
+      get().cancelBatchJob(active.id, 'shot');
+      get().cancelBatchJob(active.id, 'video');
+    }
+    set({ 
+      batchStatus: 'Đã hủy Combo Full.',
+      isGeneratingFullCombo: false
+    });
   },
   batchStatus: '',
   runningProjects: {},
@@ -3634,13 +3668,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     const srtContent = active.srtContent;
-    if (!srtContent) throw new Error('Please upload an SRT file first.');
+    if (!srtContent) throw new Error('Vui lòng tải tệp phụ đề SRT lên trước.');
     const { provider, apiKey, modelName } = get().apiConfig;
-    if (!apiKey) throw new Error('Please enter your API Key in settings.');
+    if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
 
     set({
       mappingAbortController: new AbortController(),
-      promptsAbortController: new AbortController()
+      promptsAbortController: new AbortController(),
+      isGeneratingCombo1: true
     });
 
     const runTask = async () => {
@@ -3648,7 +3683,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set((state) => ({
         runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
         isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
-        batchStatus: get().currentProject.id === projId ? 'Running scene mapping...' : state.batchStatus
+        batchStatus: get().currentProject.id === projId ? 'Đang lập sơ đồ phân cảnh...' : state.batchStatus
       }));
 
       try {
@@ -3668,7 +3703,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
           isGeneratingSceneMapping: false,
           isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
-          batchStatus: get().currentProject.id === projId ? 'Starting prompt generation...' : state.batchStatus
+          batchStatus: get().currentProject.id === projId ? 'Đang tạo các prompt vẽ ảnh...' : state.batchStatus
         }));
 
         await executeImagePromptsContextualFlow(
@@ -3682,7 +3717,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         );
 
         if (get().currentProject.id === projId) {
-          set({ batchStatus: 'Generation complete!' });
+          set({ batchStatus: 'Tạo prompts hoàn tất!' });
         }
         await get().loadHistory();
 
@@ -3690,7 +3725,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped')) {
           console.warn('All mapping & prompts generation aborted.');
           if (get().currentProject.id === projId) {
-            set({ batchStatus: 'Đã dừng tiến trình.' });
+            set({ batchStatus: 'Đã dừng tiến trình Combo 1.' });
           }
         } else {
           console.error('Error generating all mappings and prompts:', error);
@@ -3704,8 +3739,188 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             runningProjects: updatedRunning,
             isGeneratingSceneMapping: false,
             isGeneratingImagePrompts: false,
+            isGeneratingCombo1: false,
             mappingAbortController: null,
             promptsAbortController: null
+          };
+        });
+      }
+    };
+
+    get().addToQueue(projId!, 'mapping', runTask);
+  },
+
+  generateCombo2: async (resume = false) => {
+    let active = get().currentProject;
+    let projId = active.id;
+
+    if (!projId) {
+      projId = `proj_${Date.now()}`;
+      await get().saveCurrentProject(active.name);
+      active = get().currentProject;
+    }
+
+    const srtContent = active.srtContent;
+    if (!srtContent) throw new Error('Vui lòng tải tệp phụ đề SRT lên trước.');
+    const { apiKey } = get().apiConfig;
+    if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
+
+    set({
+      mappingAbortController: new AbortController(),
+      promptsAbortController: new AbortController(),
+      assetAbortController: new AbortController(),
+      isGeneratingCombo2: true
+    });
+
+    const runTask = async () => {
+      // 1. Scene Mapping
+      set((state) => ({
+        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
+        isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
+        batchStatus: get().currentProject.id === projId ? 'Đang lập sơ đồ phân cảnh...' : state.batchStatus
+      }));
+
+      try {
+        const { scenes } = await executeSceneMappingIncrementalFlow(
+          projId!,
+          srtContent,
+          get().targetDuration,
+          get().sceneMappingPrompt,
+          get().apiConfig,
+          set,
+          get,
+          resume
+        );
+
+        // 2. Image Prompts
+        set((state) => ({
+          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
+          isGeneratingSceneMapping: false,
+          isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
+          batchStatus: get().currentProject.id === projId ? 'Đang tạo các prompt vẽ ảnh...' : state.batchStatus
+        }));
+
+        await executeImagePromptsContextualFlow(
+          projId!,
+          scenes,
+          get().imagePromptPrompt,
+          get().apiConfig,
+          set,
+          get,
+          resume
+        );
+
+        // 3. Generate Reference Images (Assets)
+        if (get().currentProject.id === projId) {
+          set({ 
+            batchStatus: 'Kiểm tra ảnh tham chiếu nhân vật/bối cảnh...',
+            isGeneratingImagePrompts: false,
+            isGeneratingAssets: true 
+          });
+        }
+
+        let missingAssetsToGen = {
+          characters: [] as string[],
+          exteriors: [] as string[],
+          props: [] as string[]
+        };
+
+        if (resume) {
+          const proj = get().currentProject;
+          missingAssetsToGen.characters = (proj.characters || [])
+            .filter(c => !c.image && !c.mediaId)
+            .map(c => c.characterId);
+          missingAssetsToGen.exteriors = (proj.exteriors || [])
+            .filter(e => !e.image && !e.mediaId)
+            .map(e => e.exteriorId);
+          missingAssetsToGen.props = (proj.props || [])
+            .filter(p => !p.image && !p.mediaId)
+            .map(p => p.propId);
+        }
+
+        const hasMissingAssets = !resume || 
+          missingAssetsToGen.characters.length > 0 || 
+          missingAssetsToGen.exteriors.length > 0 || 
+          missingAssetsToGen.props.length > 0;
+
+        if (hasMissingAssets) {
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đang tự động vẽ ảnh tham chiếu (Assets)...' });
+          }
+          if (resume) {
+            await get().generateAllAssetImages(missingAssetsToGen);
+          } else {
+            await get().generateAllAssetImages();
+          }
+
+          // Wait for asset generation batch to finish
+          const assetJobKey = `${projId}_asset`;
+          await new Promise<void>((resolve, reject) => {
+            const checkInterval = setInterval(() => {
+              if (!get().runningProjects[projId!]) {
+                clearInterval(checkInterval);
+                reject(new Error('AbortError'));
+                return;
+              }
+              const jobState = get().batchJobs[assetJobKey];
+              if (!jobState || !jobState.isRunning) {
+                clearInterval(checkInterval);
+                resolve();
+              }
+            }, 1000);
+          });
+        }
+
+        // Retrieve latest project characters, exteriors, and props with generated image references
+        let updatedProj = await getProject(projId!);
+        if (updatedProj && get().currentProject.id === projId) {
+          set((state) => ({
+            characters: updatedProj.characters || [],
+            exteriors: updatedProj.exteriors || [],
+            props: updatedProj.props || [],
+            isGeneratingAssets: false,
+            currentProject: {
+              ...state.currentProject,
+              characters: updatedProj.characters || [],
+              exteriors: updatedProj.exteriors || [],
+              props: updatedProj.props || [],
+              sceneMapping: state.currentProject.sceneMapping.length > 0 ? state.currentProject.sceneMapping : (updatedProj.sceneMapping || []),
+              imagePrompts: state.currentProject.imagePrompts.length > 0 ? state.currentProject.imagePrompts : (updatedProj.imagePrompts || [])
+            }
+          }));
+        }
+
+        if (get().currentProject.id === projId) {
+          set({ batchStatus: 'Tạo prompts và ảnh tham chiếu thành công!' });
+        }
+        await get().loadHistory();
+
+      } catch (error: any) {
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped')) {
+          console.warn('Combo 2 generation aborted.');
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đã dừng tiến trình Combo 2.' });
+          }
+        } else {
+          console.error('Error in Combo 2:', error);
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: `Lỗi Combo 2: ${error.message}` });
+          }
+          throw error;
+        }
+      } finally {
+        set((state) => {
+          const updatedRunning = { ...state.runningProjects };
+          delete updatedRunning[projId!];
+          return {
+            runningProjects: updatedRunning,
+            isGeneratingSceneMapping: false,
+            isGeneratingImagePrompts: false,
+            isGeneratingAssets: false,
+            isGeneratingCombo2: false,
+            mappingAbortController: null,
+            promptsAbortController: null,
+            assetAbortController: null
           };
         });
       }
@@ -3727,14 +3942,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     const srtContent = active.srtContent;
-    if (!srtContent) throw new Error('Please upload an SRT file first.');
-    const { provider, apiKey, modelName } = get().apiConfig;
-    if (!apiKey) throw new Error('Please enter your API Key in settings.');
+    if (!srtContent) throw new Error('Vui lòng tải tệp phụ đề SRT lên trước.');
+    const { apiKey } = get().apiConfig;
+    if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
+    if (!active.videoSaveDir) throw new Error('Vui lòng thiết lập thư mục lưu video trong tab Cấu hình dự án trước khi chạy Combo Full.');
 
     set({
       mappingAbortController: new AbortController(),
       promptsAbortController: new AbortController(),
-      assetAbortController: new AbortController()
+      assetAbortController: new AbortController(),
+      isGeneratingFullCombo: true
     });
 
     const runTask = async () => {
@@ -3742,7 +3959,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set((state) => ({
         runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
         isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
-        batchStatus: get().currentProject.id === projId ? 'Running scene mapping...' : state.batchStatus
+        batchStatus: get().currentProject.id === projId ? 'Đang tạo phân cảnh (Scene Mapping)...' : state.batchStatus
       }));
 
       try {
@@ -3762,7 +3979,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
           isGeneratingSceneMapping: false,
           isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
-          batchStatus: get().currentProject.id === projId ? 'Starting prompt generation...' : state.batchStatus
+          batchStatus: get().currentProject.id === projId ? 'Đang tạo các prompt vẽ ảnh phân cảnh...' : state.batchStatus
         }));
 
         await executeImagePromptsContextualFlow(
@@ -3775,30 +3992,69 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           resume
         );
 
-        // 3. Generate Reference Images
+        // 3. Generate Reference Images (Assets)
         if (get().currentProject.id === projId) {
           set({ 
-            batchStatus: 'Generating reference images for characters & backgrounds...',
+            batchStatus: 'Kiểm tra ảnh tham chiếu nhân vật/bối cảnh...',
             isGeneratingImagePrompts: false,
             isGeneratingAssets: true 
           });
         }
-        await get().generateAllAssetImages();
 
-        // Wait for asset generation batch to finish
-        const assetJobKey = `${projId}_asset`;
-        await new Promise<void>((resolve) => {
-          const checkInterval = setInterval(() => {
-            const jobState = get().batchJobs[assetJobKey];
-            if (!jobState || !jobState.isRunning) {
-              clearInterval(checkInterval);
-              resolve();
-            }
-          }, 1000);
-        });
+        let missingAssetsToGen = {
+          characters: [] as string[],
+          exteriors: [] as string[],
+          props: [] as string[]
+        };
+
+        if (resume) {
+          const proj = get().currentProject;
+          missingAssetsToGen.characters = (proj.characters || [])
+            .filter(c => !c.image && !c.mediaId)
+            .map(c => c.characterId);
+          missingAssetsToGen.exteriors = (proj.exteriors || [])
+            .filter(e => !e.image && !e.mediaId)
+            .map(e => e.exteriorId);
+          missingAssetsToGen.props = (proj.props || [])
+            .filter(p => !p.image && !p.mediaId)
+            .map(p => p.propId);
+        }
+
+        const hasMissingAssets = !resume || 
+          missingAssetsToGen.characters.length > 0 || 
+          missingAssetsToGen.exteriors.length > 0 || 
+          missingAssetsToGen.props.length > 0;
+
+        if (hasMissingAssets) {
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: 'Đang tự động vẽ ảnh tham chiếu (Assets)...' });
+          }
+          if (resume) {
+            await get().generateAllAssetImages(missingAssetsToGen);
+          } else {
+            await get().generateAllAssetImages();
+          }
+
+          // Wait for asset generation batch to finish
+          const assetJobKey = `${projId}_asset`;
+          await new Promise<void>((resolve, reject) => {
+            const checkInterval = setInterval(() => {
+              if (!get().runningProjects[projId!]) {
+                clearInterval(checkInterval);
+                reject(new Error('AbortError'));
+                return;
+              }
+              const jobState = get().batchJobs[assetJobKey];
+              if (!jobState || !jobState.isRunning) {
+                clearInterval(checkInterval);
+                resolve();
+              }
+            }, 1000);
+          });
+        }
 
         // Retrieve latest project characters, exteriors, and props with generated image references
-        const updatedProj = await getProject(projId!);
+        let updatedProj = await getProject(projId!);
         if (updatedProj && get().currentProject.id === projId) {
           set((state) => ({
             characters: updatedProj.characters || [],
@@ -3816,19 +4072,178 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           }));
         }
 
-        if (get().currentProject.id === projId) {
-          set({ batchStatus: 'Full combo complete!' });
+        // 4. Generate Shot Images
+        const projData = (updatedProj || get().currentProject) as any;
+
+        const totalStts = projData.imagePrompts.length;
+        if (totalStts === 0) {
+          throw new Error('Không có phân cảnh nào để tạo ảnh và video.');
         }
+
+        // Identify which shots to generate
+        let sttToGenShots = projData.imagePrompts.map((p: any) => p.stt);
+        if (resume) {
+          sttToGenShots = projData.imagePrompts
+            .filter((p: any) => !p.imageUrl)
+            .map((p: any) => p.stt);
+        }
+
+        if (sttToGenShots.length > 0) {
+          if (get().currentProject.id === projId) {
+            set({ 
+              batchStatus: `Bắt đầu vẽ ${sttToGenShots.length} ảnh phân cảnh (Shots)...`,
+              isGeneratingAssets: false
+            });
+          }
+          await get().startBatchShotGeneration(sttToGenShots);
+
+          // Wait for shot generation batch to finish
+          const shotJobKey = `${projId}_shot`;
+          await new Promise<void>((resolve, reject) => {
+            const checkInterval = setInterval(() => {
+              if (!get().runningProjects[projId!]) {
+                clearInterval(checkInterval);
+                reject(new Error('AbortError'));
+                return;
+              }
+              const jobState = get().batchJobs[shotJobKey];
+              if (!jobState || !jobState.isRunning) {
+                clearInterval(checkInterval);
+                resolve();
+              } else {
+                const total = jobState.tasks.length;
+                const done = jobState.completed.length;
+                const failed = jobState.failed.length;
+                if (get().currentProject.id === projId) {
+                  set({ batchStatus: `Đang vẽ ảnh phân cảnh (Shots): ${done}/${total} (Lỗi: ${failed})` });
+                }
+              }
+            }, 1000);
+          });
+        }
+
+        // 5. Generate Video segments sequentially
+        const afterShotsProj = await getProject(projId!);
+        if (!afterShotsProj) throw new Error('Không thể tải thông tin dự án sau khi vẽ ảnh.');
+
+        // Identify which videos to generate
+        const sttToGenVideos = afterShotsProj.imagePrompts
+          .filter((p: any) => p.imageUrl && !p.videoUrl)
+          .map((p: any) => p.stt);
+
+        if (sttToGenVideos.length > 0) {
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: `Bắt đầu tạo ${sttToGenVideos.length} video phân cảnh...` });
+          }
+          await get().startBatchVideoGeneration(sttToGenVideos);
+
+          // Wait for video generation batch to finish
+          const videoJobKey = `${projId}_video`;
+          await new Promise<void>((resolve, reject) => {
+            const checkInterval = setInterval(() => {
+              if (!get().runningProjects[projId!]) {
+                clearInterval(checkInterval);
+                reject(new Error('AbortError'));
+                return;
+              }
+              const jobState = get().batchJobs[videoJobKey];
+              if (!jobState || !jobState.isRunning) {
+                clearInterval(checkInterval);
+                resolve();
+              } else {
+                const total = jobState.tasks.length;
+                const done = jobState.completed.length;
+                const failed = jobState.failed.length;
+                if (get().currentProject.id === projId) {
+                  set({ batchStatus: `Đang tạo video phân cảnh: ${done}/${total} (Lỗi: ${failed})` });
+                }
+              }
+            }, 1000);
+          });
+        }
+
+        // 5. Automatic Video Export/Compilation
+        const finalProj = await getProject(projId!);
+        if (!finalProj) throw new Error('Không thể tải dữ liệu dự án để biên dịch video.');
+
+        if (get().currentProject.id === projId) {
+          set({ batchStatus: 'Đang khởi chạy tiến trình xuất phim (.mp4) tổng hợp...' });
+        }
+
+        // Call the export POST endpoint
+        const exportRes = await fetch('/api/video/export', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            projectId: projId,
+            projectName: finalProj.name,
+            sceneMapping: finalProj.sceneMapping || [],
+            imagePrompts: finalProj.imagePrompts || [],
+            srtContent: finalProj.srtContent || '',
+            style: get().getSelectedStyle() || {},
+            videoSaveDir: finalProj.videoSaveDir,
+            videoType: 'mixed',
+            bgmVolumeDb: -18,
+            bgmSuggestions: finalProj.bgmSuggestions || []
+          })
+        });
+
+        if (!exportRes.ok) {
+          const errData = await exportRes.json();
+          throw new Error(errData.error || `Lỗi từ máy chủ xuất video: ${exportRes.status}`);
+        }
+
+        // Poll export status progress
+        let exportDone = false;
+        while (!exportDone) {
+          if (!get().runningProjects[projId!]) {
+            console.log('[Combo Full] Export cancelled.');
+            return;
+          }
+
+          const statusRes = await fetch(`/api/video/export?projectId=${projId}`);
+          if (!statusRes.ok) {
+            throw new Error(`Không thể lấy trạng thái xuất phim: ${statusRes.status}`);
+          }
+
+          const statusData = await statusRes.json();
+          const status = statusData.status;
+          const percent = statusData.percent || 0;
+          const msg = statusData.message || '';
+
+          if (status === 'completed') {
+            exportDone = true;
+            if (get().currentProject.id === projId) {
+              set({ batchStatus: `Xuất video thành công! File đã lưu vào thư mục của bạn.` });
+            }
+            break;
+          } else if (status === 'failed') {
+            throw new Error(msg || 'Tiến trình render video FFmpeg thất bại.');
+          } else {
+            if (get().currentProject.id === projId) {
+              set({ batchStatus: `Đang kết xuất video: ${percent}% - ${msg}` });
+            }
+          }
+
+          // Sleep 3 seconds
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
         await get().loadHistory();
 
       } catch (error: any) {
-        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped')) {
+        if (error.name === 'AbortError' || error.message?.includes('aborted') || error.message?.includes('stopped') || error.message === 'AbortError') {
           console.warn('Full combo generation aborted.');
           if (get().currentProject.id === projId) {
-            set({ batchStatus: 'Đã dừng tiến trình Full combo.' });
+            set({ batchStatus: 'Đang dừng hoặc đã hủy Combo Full.' });
           }
         } else {
-          console.error('Error executing full combo mapping, prompts, assets and shots:', error);
+          console.error('Error in Combo Full:', error);
+          if (get().currentProject.id === projId) {
+            set({ batchStatus: `Lỗi Combo Full: ${error.message}` });
+          }
           throw error;
         }
       } finally {
@@ -3840,6 +4255,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             isGeneratingSceneMapping: false,
             isGeneratingImagePrompts: false,
             isGeneratingAssets: false,
+            isGeneratingFullCombo: false,
             mappingAbortController: null,
             promptsAbortController: null,
             assetAbortController: null

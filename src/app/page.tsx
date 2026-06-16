@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
+import MenuBar from '../components/MenuBar';
 import HistorySidebar from '../components/HistorySidebar';
 import SRTUpload from '../components/SRTUpload';
 import SceneMappingGrid from '../components/SceneMappingGrid';
@@ -24,7 +25,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'upload' | 'mapping' | 'prompts' | 'shots' | 'references' | 'video' | 'cinema' | 'templates'>('upload');
-  const { initializeStore, currentProject, loadHistory, loadProject } = useProjectStore();
+  const { initializeStore, currentProject, loadHistory, loadProject, saveCurrentProject, exportProject } = useProjectStore();
 
   // Refresh state
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -104,19 +105,84 @@ export default function Home() {
     };
   }, [currentProject?.id, loadHistory, loadProject]);
 
-  // Handle keyboard shortcut F5 to trigger local refresh instead of app reload
+  const handleSave = async () => {
+    try {
+      if (currentProject.name) {
+        await saveCurrentProject(currentProject.name);
+        alert('Đã lưu dự án thành công!');
+      } else {
+        alert('Tên dự án không hợp lệ để lưu.');
+      }
+    } catch (err: any) {
+      alert('Lưu dự án thất bại: ' + err.message);
+    }
+  };
+
+  const handleExport = () => {
+    if (currentProject.id) {
+      exportProject(currentProject.id);
+    } else {
+      alert('Không có dự án hiện tại để xuất.');
+    }
+  };
+
+  // Handle keyboard shortcuts (F5, Ctrl+S, Ctrl+E, Ctrl+R, Ctrl+Shift+I, F11)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      // F5 -> Refresh Project Data
       if (e.key === 'F5') {
         e.preventDefault();
         handleRefresh();
       }
+      
+      // Ctrl + S -> Save Project
+      if (isCtrl && key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+
+      // Ctrl + E -> Export Project
+      if (isCtrl && key === 'e') {
+        e.preventDefault();
+        handleExport();
+      }
+
+      // Ctrl + R / Ctrl + Shift + R -> App Reload
+      if (isCtrl && key === 'r') {
+        e.preventDefault();
+        const electronAPI = (window as any).electronAPI;
+        if (electronAPI?.sendWindowAction) {
+          electronAPI.sendWindowAction('reload');
+        }
+      }
+
+      // Ctrl + Shift + I -> Toggle DevTools
+      if (isCtrl && e.shiftKey && key === 'i') {
+        e.preventDefault();
+        const electronAPI = (window as any).electronAPI;
+        if (electronAPI?.sendWindowAction) {
+          electronAPI.sendWindowAction('toggle-devtools');
+        }
+      }
+
+      // F11 -> Toggle Full Screen
+      if (e.key === 'F11') {
+        e.preventDefault();
+        const electronAPI = (window as any).electronAPI;
+        if (electronAPI?.sendWindowAction) {
+          electronAPI.sendWindowAction('toggle-fullscreen');
+        }
+      }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [currentProject?.id, isRefreshing]);
+  }, [currentProject?.id, currentProject?.name, isRefreshing, saveCurrentProject, exportProject]);
 
 
   const isUploadCompleted = !!currentProject.srtContent;
@@ -189,6 +255,9 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#090d16] text-slate-100">
+      {/* Top Menu Bar */}
+      <MenuBar onSave={handleSave} onExport={handleExport} />
+
       {/* Header Banner */}
       <Header />
 

@@ -368,3 +368,22 @@ ipcMain.handle('trigger-app-update', async (event, { url, version }) => {
   }
 });
 
+// Handle custom window actions from HTML menu bar
+ipcMain.on('window-action', (event, action) => {
+  if (!mainWindow) return;
+  if (action === 'reload') {
+    mainWindow.reload();
+  } else if (action === 'toggle-devtools') {
+    mainWindow.webContents.toggleDevTools();
+  } else if (action === 'toggle-fullscreen') {
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  } else if (action === 'minimize') {
+    mainWindow.minimize();
+  } else if (action === 'close') {
+    mainWindow.close();
+  } else if (action === 'exit') {
+    killNextProcess();
+    app.quit();
+  }
+});
+

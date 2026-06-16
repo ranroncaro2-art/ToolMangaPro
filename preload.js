@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const subscription = (event, progress) => callback(progress);
     ipcRenderer.on('update-progress', subscription);
     return () => ipcRenderer.removeListener('update-progress', subscription);
-  }
+  },
+  sendWindowAction: (action) => ipcRenderer.send('window-action', action)
 });

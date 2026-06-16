@@ -13,10 +13,16 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
     isGeneratingSceneMapping,
     generateAllMappingAndPrompts,
     isGeneratingImagePrompts,
+    generateCombo2,
     generateFullCombo,
     isGeneratingAssets,
+    isGeneratingCombo1,
+    isGeneratingCombo2,
+    isGeneratingFullCombo,
     cancelSceneMapping,
     cancelImagePrompts,
+    cancelCombo1,
+    cancelCombo2,
     cancelFullCombo,
     targetDuration,
     setTargetDuration,
@@ -109,6 +115,14 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
   };
 
   const hasApiKey = !!apiConfig?.apiKey;
+  const isAnyGenerating = !!(
+    isGeneratingCombo1 ||
+    isGeneratingCombo2 ||
+    isGeneratingFullCombo ||
+    isGeneratingSceneMapping ||
+    isGeneratingImagePrompts ||
+    isGeneratingAssets
+  );
 
   useEffect(() => {
     if (currentStyle && !editingStyle) {
@@ -244,22 +258,22 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
     }
   };
 
-  const handleGenerate = async (resume: boolean = false) => {
+  const handleGenerateCombo1 = async (resume: boolean = false) => {
     if (!currentProject.srtContent) return;
     setErrorMsg('');
     try {
-      await generateSceneMapping(resume);
+      await generateAllMappingAndPrompts(resume);
       onNextTab(); // Go to Scene Mapping Grid tab
     } catch (err) {
       setErrorMsg((err as Error).message);
     }
   };
 
-  const handleGenerateAll = async (resume: boolean = false) => {
+  const handleGenerateCombo2 = async (resume: boolean = false) => {
     if (!currentProject.srtContent) return;
     setErrorMsg('');
     try {
-      await generateAllMappingAndPrompts(resume);
+      await generateCombo2(resume);
       onNextTab(); // Go to Scene Mapping Grid tab
     } catch (err) {
       setErrorMsg((err as Error).message);
@@ -296,24 +310,24 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
 
       {/* 3 Main Action Card Buttons at the Very Top */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card 1: Generate Mapping */}
+        {/* Card 1: Combo 1 (Tạo Prompt) */}
         <div
-          className="relative group overflow-hidden bg-slate-900/35 border border-slate-900 p-5 rounded-xl shadow-lg transition-all duration-300 text-left select-none flex flex-col justify-between min-h-[140px]"
+          className="relative group overflow-hidden bg-slate-900/35 border border-slate-900 p-5 rounded-xl shadow-lg transition-all duration-300 text-left select-none flex flex-col justify-between min-h-[145px]"
         >
           <div className="flex items-center justify-between w-full">
-            <span className="text-[10px] font-bold text-violet-400 font-mono tracking-wider bg-violet-950/50 px-2 py-0.5 rounded border border-violet-900/40">BƯỚC 1</span>
+            <span className="text-[10px] font-bold text-violet-400 font-mono tracking-wider bg-violet-950/50 px-2 py-0.5 rounded border border-violet-900/40">COMBO 1</span>
             <Sparkles className="w-5 h-5 text-violet-400 group-hover:scale-110 transition duration-300" />
           </div>
           <div className="mt-3 mb-4">
-            <h4 className="font-bold text-slate-200 text-sm tracking-wide">Chỉ chạy mapping</h4>
+            <h4 className="font-bold text-slate-200 text-sm tracking-wide">Combo 1: Tạo Prompt</h4>
             <p className="text-[10px] text-gray-400 mt-1 leading-normal font-medium">
-              Phân tích kịch bản phụ đề SRT và lập sơ đồ phân cảnh Scene Mapping
+              Lập sơ đồ phân cảnh và tạo các prompt mô tả vẽ ảnh (Mapping & Prompts)
             </p>
           </div>
           <div className="flex gap-2">
-            {isGeneratingSceneMapping ? (
+            {isGeneratingCombo1 ? (
               <button
-                onClick={cancelSceneMapping}
+                onClick={cancelCombo1}
                 className="flex-1 bg-rose-650 hover:bg-rose-555 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-rose-600/40 cursor-pointer transition duration-200 text-center font-bold"
               >
                 Dừng lại
@@ -321,18 +335,18 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
             ) : (
               <>
                 <button
-                  onClick={() => handleGenerate(false)}
-                  disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-                  className="flex-1 bg-violet-650 hover:bg-violet-555 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-violet-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
+                  onClick={() => handleGenerateCombo1(false)}
+                  disabled={isAnyGenerating || !hasApiKey || !currentProject.srtContent}
+                  className="flex-1 bg-violet-650 hover:bg-violet-555 disabled:bg-slate-950/20 disabled:text-gray-650 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-violet-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
                 >
                   {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
                 </button>
                 {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
                   <button
-                    onClick={() => handleGenerate(true)}
-                    disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                    onClick={() => handleGenerateCombo1(true)}
+                    disabled={isAnyGenerating || !hasApiKey || !currentProject.srtContent}
                     className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-violet-400 hover:text-violet-300 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
-                    title="Tiếp tục phân tích các subtitle chưa được mapping"
+                    title="Tiếp tục chạy combo cho các phần chưa hoàn thành"
                   >
                     <Play className="w-2.5 h-2.5 fill-current" />
                     Tạo tiếp
@@ -341,29 +355,29 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
               </>
             )}
           </div>
-          {isGeneratingSceneMapping && (
+          {isGeneratingCombo1 && (
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-violet-600 animate-pulse"></div>
           )}
         </div>
 
-        {/* Card 2: Mapping & Prompts */}
+        {/* Card 2: Combo 2 (Prompt & Ảnh tham chiếu) */}
         <div
-          className="relative group overflow-hidden bg-slate-900/35 border border-slate-900 p-5 rounded-xl shadow-lg transition-all duration-300 text-left select-none flex flex-col justify-between min-h-[140px]"
+          className="relative group overflow-hidden bg-slate-900/35 border border-slate-900 p-5 rounded-xl shadow-lg transition-all duration-300 text-left select-none flex flex-col justify-between min-h-[145px]"
         >
           <div className="flex items-center justify-between w-full">
-            <span className="text-[10px] font-bold text-fuchsia-400 font-mono tracking-wider bg-fuchsia-950/50 px-2 py-0.5 rounded border border-fuchsia-900/40">BƯỚC 2</span>
+            <span className="text-[10px] font-bold text-fuchsia-400 font-mono tracking-wider bg-fuchsia-950/50 px-2 py-0.5 rounded border border-fuchsia-900/40">COMBO 2</span>
             <Sparkles className="w-5 h-5 text-fuchsia-400 group-hover:scale-110 transition duration-300" />
           </div>
           <div className="mt-3 mb-4">
-            <h4 className="font-bold text-slate-200 text-sm tracking-wide">Combo chạy mapping và prompts ảnh shots</h4>
+            <h4 className="font-bold text-slate-200 text-sm tracking-wide">Combo 2: Prompt + Ảnh tham chiếu</h4>
             <p className="text-[10px] text-gray-400 mt-1 leading-normal font-medium">
-              Tạo lập bối cảnh phim và sinh các prompt mô tả vẽ ảnh
+              Tạo lập bối cảnh phim, sinh prompt mô tả và vẽ ảnh tham chiếu (Assets)
             </p>
           </div>
           <div className="flex gap-2">
-            {isGeneratingImagePrompts ? (
+            {isGeneratingCombo2 ? (
               <button
-                onClick={cancelImagePrompts}
+                onClick={cancelCombo2}
                 className="flex-1 bg-rose-650 hover:bg-rose-555 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-rose-600/40 cursor-pointer transition duration-200 text-center font-bold"
               >
                 Dừng lại
@@ -371,18 +385,18 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
             ) : (
               <>
                 <button
-                  onClick={() => handleGenerateAll(false)}
-                  disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-                  className="flex-1 bg-fuchsia-650 hover:bg-fuchsia-555 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-fuchsia-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
+                  onClick={() => handleGenerateCombo2(false)}
+                  disabled={isAnyGenerating || !hasApiKey || !currentProject.srtContent}
+                  className="flex-1 bg-fuchsia-650 hover:bg-fuchsia-555 disabled:bg-slate-950/20 disabled:text-gray-650 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-fuchsia-600/40 cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
                 >
                   {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
                 </button>
                 {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
                   <button
-                    onClick={() => handleGenerateAll(true)}
-                    disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                    onClick={() => handleGenerateCombo2(true)}
+                    disabled={isAnyGenerating || !hasApiKey || !currentProject.srtContent}
                     className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-700 text-fuchsia-400 hover:text-fuchsia-300 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
-                    title="Tiếp tục tạo phân cảnh và prompts chưa có"
+                    title="Tiếp tục chạy combo cho các phần chưa hoàn thành"
                   >
                     <Play className="w-2.5 h-2.5 fill-current" />
                     Tạo tiếp
@@ -391,27 +405,27 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
               </>
             )}
           </div>
-          {isGeneratingImagePrompts && (
+          {isGeneratingCombo2 && (
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-fuchsia-650 animate-pulse"></div>
           )}
         </div>
 
-        {/* Card 3: Run Full Combo */}
+        {/* Card 3: Combo 3 (Tự động toàn bộ) */}
         <div
-          className="relative group overflow-hidden bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-slate-900 disabled:to-slate-950 p-5 rounded-xl shadow-xl transition-all duration-300 text-left select-none flex flex-col justify-between min-h-[140px]"
+          className="relative group overflow-hidden bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-slate-900 disabled:to-slate-950 p-5 rounded-xl shadow-xl transition-all duration-300 text-left select-none flex flex-col justify-between min-h-[145px]"
         >
           <div className="flex items-center justify-between w-full">
-            <span className="text-[10px] font-bold text-white font-mono tracking-wider bg-white/10 px-2 py-0.5 rounded border border-white/10">TỰ ĐỘNG TOÀN BỘ</span>
+            <span className="text-[10px] font-bold text-white font-mono tracking-wider bg-white/10 px-2 py-0.5 rounded border border-white/10">COMBO 3 (FULL)</span>
             <Sparkles className="w-5 h-5 text-white group-hover:scale-110 transition duration-300" />
           </div>
           <div className="mt-3 mb-4">
-            <h4 className="font-bold text-white text-sm tracking-wide">Full combo mapping - prompts shots - vẽ ảnh tham chiếu tự động</h4>
+            <h4 className="font-bold text-white text-sm tracking-wide">Combo 3: Tự động toàn bộ</h4>
             <p className="text-[10px] text-white/80 mt-1 leading-normal font-medium">
-              Chạy tự động toàn bộ: Lập sơ đồ ➔ Tạo Prompt ➔ Vẽ ảnh hàng loạt
+              Chạy tự động: Phân cảnh ➔ Prompt ➔ Ảnh tham chiếu ➔ Ảnh Shots ➔ Video ➔ Xuất video .mp4
             </p>
           </div>
           <div className="flex gap-2">
-            {(isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets) ? (
+            {isGeneratingFullCombo ? (
               <button
                 onClick={cancelFullCombo}
                 className="flex-1 bg-rose-650 hover:bg-rose-555 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg border border-rose-600/40 cursor-pointer transition duration-200 text-center font-bold"
@@ -422,15 +436,15 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
               <>
                 <button
                   onClick={() => handleGenerateFullCombo(false)}
-                  disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
-                  className="flex-1 bg-white/10 hover:bg-white/20 disabled:bg-slate-950/20 disabled:text-gray-600 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
+                  disabled={isAnyGenerating || !hasApiKey || !currentProject.srtContent}
+                  className="flex-1 bg-white/10 hover:bg-white/20 disabled:bg-slate-950/20 disabled:text-gray-650 disabled:border-transparent text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center"
                 >
                   {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 ? 'Tạo mới' : 'Chạy'}
                 </button>
                 {currentProject.sceneMapping && currentProject.sceneMapping.length > 0 && (
                   <button
                     onClick={() => handleGenerateFullCombo(true)}
-                    disabled={isGeneratingSceneMapping || isGeneratingImagePrompts || isGeneratingAssets || !hasApiKey || !currentProject.srtContent}
+                    disabled={isAnyGenerating || !hasApiKey || !currentProject.srtContent}
                     className="flex-1 bg-white/20 hover:bg-white/30 border border-white/10 text-white text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer disabled:cursor-not-allowed transition duration-200 text-center flex items-center justify-center gap-1"
                     title="Tiếp tục chạy combo cho các phần chưa hoàn thành"
                   >
@@ -441,8 +455,8 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
               </>
             )}
           </div>
-          {isGeneratingAssets && (
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white animate-pulse"></div>
+          {isGeneratingFullCombo && (
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/80 animate-pulse"></div>
           )}
         </div>
       </div>
