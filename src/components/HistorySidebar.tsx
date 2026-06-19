@@ -13,6 +13,7 @@ export default function HistorySidebar({ onNewProjectCreated }: { onNewProjectCr
     currentProject,
     setSrtContent,
     runningProjects,
+    runningCombos,
     exportProject,
     importProject
   } = useProjectStore();
@@ -225,23 +226,46 @@ export default function HistorySidebar({ onNewProjectCreated }: { onNewProjectCr
                   <div className="font-semibold text-xs text-slate-200 group-hover:text-violet-400 transition truncate pr-2">
                     {project.name}
                   </div>
-                  {runningProjects[project.id] && (
+                  {(runningProjects[project.id] || runningCombos?.[project.id]) && (
                     <div className={`flex items-center gap-1.5 border rounded px-1.5 py-0.5 shrink-0 text-[8px] font-bold ${
-                      runningProjects[project.id].endsWith('_queued')
+                      runningProjects[project.id]?.endsWith('_queued')
                         ? 'bg-slate-800/40 border-slate-700 text-slate-400'
                         : 'bg-violet-950/80 border-violet-805 text-violet-300'
                     }`}>
                       <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-                        runningProjects[project.id].endsWith('_queued')
+                        runningProjects[project.id]?.endsWith('_queued')
                           ? 'bg-slate-500'
                           : 'bg-violet-400'
                       }`} />
                       <span>
-                        {runningProjects[project.id] === 'mapping'
-                          ? 'MAPPING'
-                          : runningProjects[project.id] === 'prompts'
-                          ? 'PROMPTS'
-                          : 'QUEUED'}
+                        {(() => {
+                          const combo = runningCombos?.[project.id];
+                          const stage = runningProjects[project.id];
+                          
+                          let label = '';
+                          if (combo === 'combo1') label = 'COMBO 1';
+                          else if (combo === 'combo2') label = 'COMBO 2';
+                          else if (combo === 'combo3') label = 'COMBO 3';
+                          
+                          if (stage) {
+                            const stageLabel = stage === 'mapping'
+                              ? 'MAP'
+                              : stage === 'prompts'
+                              ? 'PRM'
+                              : stage === 'assets'
+                              ? 'AST'
+                              : stage === 'shots'
+                              ? 'SHT'
+                              : stage === 'video'
+                              ? 'VID'
+                              : stage === 'export'
+                              ? 'EXP'
+                              : 'Q';
+                            label = label ? `${label}: ${stageLabel}` : stageLabel.toUpperCase();
+                          }
+                          
+                          return label || 'RUNNING';
+                        })()}
                       </span>
                     </div>
                   )}

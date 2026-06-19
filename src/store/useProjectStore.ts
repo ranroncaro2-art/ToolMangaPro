@@ -636,7 +636,12 @@ interface ProjectState {
   cancelCombo2: () => void;
   cancelFullCombo: () => void;
   batchStatus: string;
-  runningProjects: Record<string, 'mapping' | 'prompts' | 'mapping_queued' | 'prompts_queued'>;
+  runningProjects: Record<
+    string,
+    'mapping' | 'prompts' | 'assets' | 'shots' | 'video' | 'export' | 'mapping_queued' | 'prompts_queued'
+  >;
+  runningCombos: Record<string, 'combo1' | 'combo2' | 'combo3'>;
+  updateGeneratingFlags: (projId: string) => void;
   tokenUsage: {
     inputTokens: number;
     outputTokens: number;
@@ -1595,14 +1600,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 provider: 'gemini',
                 modelName: 'gemini-2.5-flash',
                 srtContent: '',
+                scriptContent: '',
                 srtMeta: { lineCount: 0, duration: '00:00:00' },
                 sceneMapping: [],
                 imagePrompts: [],
                 characters: [],
                 exteriors: [],
                 props: [],
+                selectedStyleId: 'manga_color',
+                videoSaveDir: '',
+                autoDownloadVideo: false,
                 bgmSuggestions: [],
-                bgmVolumeDb: -18
+                bgmVolumeDb: -18,
+                hookSegments: []
               },
               bgmFiles: []
             });
@@ -2258,7 +2268,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     videoSaveDir: '',
     autoDownloadVideo: false,
     bgmSuggestions: [] as BgmSuggestionRow[],
-    bgmVolumeDb: -18
+    bgmVolumeDb: -18,
+    hookSegments: [] as number[]
   },
   setCurrentProjectField: (field, value) => {
     set((state) => ({
@@ -2287,7 +2298,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           videoSaveDir: '',
           autoDownloadVideo: false,
           bgmSuggestions: [],
-          bgmVolumeDb: -18
+          bgmVolumeDb: -18,
+          hookSegments: []
         },
         bgmFiles: []
       }));
@@ -2312,7 +2324,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         sceneMapping: [],
         imagePrompts: [],
         bgmSuggestions: [],
-        bgmVolumeDb: -18
+        bgmVolumeDb: -18,
+        hookSegments: []
       },
       bgmFiles: []
     }));
@@ -2587,7 +2600,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       characters: [],
       exteriors: [],
       props: [],
-      selectedStyleId: 'manga_color'
+      selectedStyleId: 'manga_color',
+      bgmSuggestions: [],
+      bgmVolumeDb: -18,
+      hookSegments: []
     };
 
     await saveProject(newProj);
@@ -2606,7 +2622,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         characters: [],
         exteriors: [],
         props: [],
-        selectedStyleId: 'manga_color'
+        selectedStyleId: 'manga_color',
+        bgmSuggestions: [],
+        bgmVolumeDb: -18,
+        hookSegments: []
       },
       characters: [],
       exteriors: [],
@@ -2643,7 +2662,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       videoSaveDir: active.videoSaveDir || '',
       autoDownloadVideo: !!active.autoDownloadVideo,
       bgmSuggestions: active.bgmSuggestions || [],
-      bgmVolumeDb: active.bgmVolumeDb ?? -18
+      bgmVolumeDb: active.bgmVolumeDb ?? -18,
+      hookSegments: active.hookSegments || []
     };
 
     await saveProject(projectData);
@@ -2678,6 +2698,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         await get().loadHistory();
       }
       const runningStatus = get().runningProjects[id] || null;
+      const runningCombo = get().runningCombos?.[id] || null;
+      const hasAssetsGen = get().assetGeneratingIds?.some(key => key.startsWith(`${id}_`)) || false;
+      const assetJobKey = `${id}_asset`;
+      const isAssetJobRunning = !!get().batchJobs?.[assetJobKey]?.isRunning;
+
       const chars = proj.characters || [];
       const exts = proj.exteriors || [];
       const propsList = proj.props || [];
@@ -2699,13 +2724,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           videoSaveDir: proj.videoSaveDir || '',
           autoDownloadVideo: !!proj.autoDownloadVideo,
           bgmSuggestions: proj.bgmSuggestions || [],
-          bgmVolumeDb: proj.bgmVolumeDb ?? -18
+          bgmVolumeDb: proj.bgmVolumeDb ?? -18,
+          hookSegments: proj.hookSegments || []
         },
         characters: chars,
         exteriors: exts,
         props: propsList,
+        isGeneratingCombo1: runningCombo === 'combo1',
+        isGeneratingCombo2: runningCombo === 'combo2',
+        isGeneratingFullCombo: runningCombo === 'combo3',
         isGeneratingSceneMapping: runningStatus === 'mapping' || runningStatus === 'mapping_queued',
         isGeneratingImagePrompts: runningStatus === 'prompts' || runningStatus === 'prompts_queued',
+        isGeneratingAssets: hasAssetsGen || runningStatus === 'assets' || isAssetJobRunning,
         batchStatus: runningStatus === 'mapping_queued' || runningStatus === 'prompts_queued'
           ? 'Waiting in API queue...'
           : runningStatus === 'prompts'
@@ -2737,7 +2767,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           exteriors: [],
           props: [],
           bgmSuggestions: [],
-          bgmVolumeDb: -18
+          bgmVolumeDb: -18,
+          hookSegments: []
         },
         bgmFiles: []
       });
@@ -2766,7 +2797,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         videoSaveDir: proj.videoSaveDir || '',
         autoDownloadVideo: !!proj.autoDownloadVideo,
         bgmSuggestions: JSON.parse(JSON.stringify(proj.bgmSuggestions || [])),
-        bgmVolumeDb: proj.bgmVolumeDb ?? -18
+        bgmVolumeDb: proj.bgmVolumeDb ?? -18,
+        hookSegments: JSON.parse(JSON.stringify(proj.hookSegments || []))
       };
       await saveProject(newProj);
       await get().loadHistory();
@@ -3398,6 +3430,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assetGeneratingIds: [],
       isGeneratingAssets: false
     });
+    if (active.id) {
+      get().updateGeneratingFlags(active.id);
+    }
   },
   assetGeneratingIds: [],
   mappingAbortController: null as AbortController | null,
@@ -3418,6 +3453,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         delete updatedRunning[active.id!];
         return { runningProjects: updatedRunning };
       });
+      get().updateGeneratingFlags(active.id);
     }
   },
   promptsAbortController: null as AbortController | null,
@@ -3438,41 +3474,83 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         delete updatedRunning[active.id!];
         return { runningProjects: updatedRunning };
       });
+      get().updateGeneratingFlags(active.id);
     }
   },
   cancelCombo1: () => {
+    const active = get().currentProject;
     get().cancelSceneMapping();
     get().cancelImagePrompts();
-    set({
-      isGeneratingCombo1: false,
-      batchStatus: 'Đã hủy Combo 1.'
-    });
+    if (active.id) {
+      set((state) => {
+        const updatedCombos = { ...state.runningCombos };
+        delete updatedCombos[active.id!];
+        return {
+          runningCombos: updatedCombos,
+          batchStatus: 'Đã hủy Combo 1.'
+        };
+      });
+      get().updateGeneratingFlags(active.id);
+    }
   },
   cancelCombo2: () => {
+    const active = get().currentProject;
     get().cancelSceneMapping();
     get().cancelImagePrompts();
     get().cancelAssetGeneration();
-    set({
-      isGeneratingCombo2: false,
-      batchStatus: 'Đã hủy Combo 2.'
-    });
+    if (active.id) {
+      set((state) => {
+        const updatedCombos = { ...state.runningCombos };
+        delete updatedCombos[active.id!];
+        return {
+          runningCombos: updatedCombos,
+          batchStatus: 'Đã hủy Combo 2.'
+        };
+      });
+      get().updateGeneratingFlags(active.id);
+    }
   },
   cancelFullCombo: () => {
+    const active = get().currentProject;
     get().cancelSceneMapping();
     get().cancelImagePrompts();
     get().cancelAssetGeneration();
-    const active = get().currentProject;
     if (active.id) {
       get().cancelBatchJob(active.id, 'shot');
       get().cancelBatchJob(active.id, 'video');
+      set((state) => {
+        const updatedCombos = { ...state.runningCombos };
+        delete updatedCombos[active.id!];
+        return {
+          runningCombos: updatedCombos,
+          batchStatus: 'Đã hủy Combo Full.'
+        };
+      });
+      get().updateGeneratingFlags(active.id);
     }
-    set({ 
-      batchStatus: 'Đã hủy Combo Full.',
-      isGeneratingFullCombo: false
-    });
   },
   batchStatus: '',
   runningProjects: {},
+  runningCombos: {},
+  updateGeneratingFlags: (projId) => {
+    const isCurrent = get().currentProject.id === projId;
+    if (!isCurrent) return;
+
+    const runningStatus = get().runningProjects[projId] || null;
+    const runningCombo = get().runningCombos[projId] || null;
+    const hasAssetsGen = get().assetGeneratingIds.some((key: string) => key.startsWith(`${projId}_`));
+    const assetJobKey = `${projId}_asset`;
+    const isAssetJobRunning = !!get().batchJobs[assetJobKey]?.isRunning;
+
+    set({
+      isGeneratingCombo1: runningCombo === 'combo1',
+      isGeneratingCombo2: runningCombo === 'combo2',
+      isGeneratingFullCombo: runningCombo === 'combo3',
+      isGeneratingSceneMapping: runningStatus === 'mapping' || runningStatus === 'mapping_queued',
+      isGeneratingImagePrompts: runningStatus === 'prompts' || runningStatus === 'prompts_queued',
+      isGeneratingAssets: hasAssetsGen || runningStatus === 'assets' || isAssetJobRunning
+    });
+  },
   tokenUsage: {
     inputTokens: 0,
     outputTokens: 0,
@@ -3492,11 +3570,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       runningProjects: {
         ...state.runningProjects,
         [projectId]: type === 'mapping' ? 'mapping_queued' : 'prompts_queued'
-      },
-      isGeneratingSceneMapping: get().currentProject.id === projectId && type === 'mapping' ? true : get().isGeneratingSceneMapping,
-      isGeneratingImagePrompts: get().currentProject.id === projectId && type === 'prompts' ? true : get().isGeneratingImagePrompts,
-      batchStatus: get().currentProject.id === projectId ? 'Waiting in API queue...' : get().batchStatus
+      }
     }));
+    get().updateGeneratingFlags(projectId);
+    if (get().currentProject.id === projectId) {
+      set({ batchStatus: 'Waiting in API queue...' });
+    }
 
     setTimeout(() => {
       get().processNextInQueue().catch(err => console.error("Error processing queue:", err));
@@ -3549,10 +3628,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const runTask = async () => {
       set((state) => ({
-        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
-        isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
-        batchStatus: get().currentProject.id === projId ? 'Running scene mapping...' : state.batchStatus
+        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' as const }
       }));
+      get().updateGeneratingFlags(projId!);
+      if (get().currentProject.id === projId) {
+        set({ batchStatus: 'Running scene mapping...' });
+      }
 
       try {
         await executeSceneMappingIncrementalFlow(
@@ -3581,10 +3662,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           delete updatedRunning[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingSceneMapping: get().currentProject.id === projId ? false : state.isGeneratingSceneMapping,
             mappingAbortController: null
           };
         });
+        get().updateGeneratingFlags(projId!);
       }
     };
 
@@ -3612,10 +3693,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const runTask = async () => {
       set((state) => ({
-        runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
-        isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
-        batchStatus: get().currentProject.id === projId ? 'Starting prompt generation...' : state.batchStatus
+        runningProjects: { ...state.runningProjects, [projId!]: 'prompts' as const }
       }));
+      get().updateGeneratingFlags(projId!);
+      if (get().currentProject.id === projId) {
+        set({ batchStatus: 'Starting prompt generation...' });
+      }
 
       try {
         await executeImagePromptsContextualFlow(
@@ -3647,10 +3730,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           delete updatedRunning[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingImagePrompts: get().currentProject.id === projId ? false : state.isGeneratingImagePrompts,
             promptsAbortController: null
           };
         });
+        get().updateGeneratingFlags(projId!);
       }
     };
 
@@ -3672,19 +3755,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { provider, apiKey, modelName } = get().apiConfig;
     if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
 
-    set({
+    set((state) => ({
       mappingAbortController: new AbortController(),
       promptsAbortController: new AbortController(),
-      isGeneratingCombo1: true
-    });
+      runningCombos: { ...state.runningCombos, [projId!]: 'combo1' as const }
+    }));
+    get().updateGeneratingFlags(projId!);
 
     const runTask = async () => {
       // 1. Scene Mapping
       set((state) => ({
-        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
-        isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
-        batchStatus: get().currentProject.id === projId ? 'Đang lập sơ đồ phân cảnh...' : state.batchStatus
+        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' as const }
       }));
+      get().updateGeneratingFlags(projId!);
+      if (get().currentProject.id === projId) {
+        set({ batchStatus: 'Đang lập sơ đồ phân cảnh...' });
+      }
 
       try {
         const { scenes } = await executeSceneMappingIncrementalFlow(
@@ -3700,11 +3786,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
         // 2. Image Prompts
         set((state) => ({
-          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
-          isGeneratingSceneMapping: false,
-          isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
-          batchStatus: get().currentProject.id === projId ? 'Đang tạo các prompt vẽ ảnh...' : state.batchStatus
+          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' as const }
         }));
+        get().updateGeneratingFlags(projId!);
+        if (get().currentProject.id === projId) {
+          set({ batchStatus: 'Đang tạo các prompt vẽ ảnh...' });
+        }
 
         await executeImagePromptsContextualFlow(
           projId!,
@@ -3735,15 +3822,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
           delete updatedRunning[projId!];
+          const updatedCombos = { ...state.runningCombos };
+          delete updatedCombos[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingSceneMapping: false,
-            isGeneratingImagePrompts: false,
-            isGeneratingCombo1: false,
+            runningCombos: updatedCombos,
             mappingAbortController: null,
             promptsAbortController: null
           };
         });
+        get().updateGeneratingFlags(projId!);
       }
     };
 
@@ -3765,20 +3853,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { apiKey } = get().apiConfig;
     if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
 
-    set({
+    set((state) => ({
       mappingAbortController: new AbortController(),
       promptsAbortController: new AbortController(),
       assetAbortController: new AbortController(),
-      isGeneratingCombo2: true
-    });
+      runningCombos: { ...state.runningCombos, [projId!]: 'combo2' as const }
+    }));
+    get().updateGeneratingFlags(projId!);
 
     const runTask = async () => {
       // 1. Scene Mapping
       set((state) => ({
-        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
-        isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
-        batchStatus: get().currentProject.id === projId ? 'Đang lập sơ đồ phân cảnh...' : state.batchStatus
+        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' as const }
       }));
+      get().updateGeneratingFlags(projId!);
+      if (get().currentProject.id === projId) {
+        set({ batchStatus: 'Đang lập sơ đồ phân cảnh...' });
+      }
 
       try {
         const { scenes } = await executeSceneMappingIncrementalFlow(
@@ -3794,11 +3885,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
         // 2. Image Prompts
         set((state) => ({
-          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
-          isGeneratingSceneMapping: false,
-          isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
-          batchStatus: get().currentProject.id === projId ? 'Đang tạo các prompt vẽ ảnh...' : state.batchStatus
+          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' as const }
         }));
+        get().updateGeneratingFlags(projId!);
+        if (get().currentProject.id === projId) {
+          set({ batchStatus: 'Đang tạo các prompt vẽ ảnh...' });
+        }
 
         await executeImagePromptsContextualFlow(
           projId!,
@@ -3811,12 +3903,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         );
 
         // 3. Generate Reference Images (Assets)
+        set((state) => ({
+          runningProjects: { ...state.runningProjects, [projId!]: 'assets' as const }
+        }));
+        get().updateGeneratingFlags(projId!);
         if (get().currentProject.id === projId) {
-          set({ 
-            batchStatus: 'Kiểm tra ảnh tham chiếu nhân vật/bối cảnh...',
-            isGeneratingImagePrompts: false,
-            isGeneratingAssets: true 
-          });
+          set({ batchStatus: 'Kiểm tra ảnh tham chiếu nhân vật/bối cảnh...' });
         }
 
         let missingAssetsToGen = {
@@ -3878,14 +3970,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             characters: updatedProj.characters || [],
             exteriors: updatedProj.exteriors || [],
             props: updatedProj.props || [],
-            isGeneratingAssets: false,
             currentProject: {
               ...state.currentProject,
               characters: updatedProj.characters || [],
               exteriors: updatedProj.exteriors || [],
               props: updatedProj.props || [],
-              sceneMapping: state.currentProject.sceneMapping.length > 0 ? state.currentProject.sceneMapping : (updatedProj.sceneMapping || []),
-              imagePrompts: state.currentProject.imagePrompts.length > 0 ? state.currentProject.imagePrompts : (updatedProj.imagePrompts || [])
+              sceneMapping: (state.currentProject?.sceneMapping || []).length > 0 ? state.currentProject.sceneMapping : (updatedProj.sceneMapping || []),
+              imagePrompts: (state.currentProject?.imagePrompts || []).length > 0 ? state.currentProject.imagePrompts : (updatedProj.imagePrompts || [])
             }
           }));
         }
@@ -3912,17 +4003,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
           delete updatedRunning[projId!];
+          const updatedCombos = { ...state.runningCombos };
+          delete updatedCombos[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingSceneMapping: false,
-            isGeneratingImagePrompts: false,
-            isGeneratingAssets: false,
-            isGeneratingCombo2: false,
+            runningCombos: updatedCombos,
             mappingAbortController: null,
             promptsAbortController: null,
             assetAbortController: null
           };
         });
+        get().updateGeneratingFlags(projId!);
       }
     };
 
@@ -3947,20 +4038,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
     if (!active.videoSaveDir) throw new Error('Vui lòng thiết lập thư mục lưu video trong tab Cấu hình dự án trước khi chạy Combo Full.');
 
-    set({
+    set((state) => ({
       mappingAbortController: new AbortController(),
       promptsAbortController: new AbortController(),
       assetAbortController: new AbortController(),
-      isGeneratingFullCombo: true
-    });
+      runningCombos: { ...state.runningCombos, [projId!]: 'combo3' as const }
+    }));
+    get().updateGeneratingFlags(projId!);
 
     const runTask = async () => {
       // 1. Scene Mapping
       set((state) => ({
-        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' },
-        isGeneratingSceneMapping: get().currentProject.id === projId ? true : state.isGeneratingSceneMapping,
-        batchStatus: get().currentProject.id === projId ? 'Đang tạo phân cảnh (Scene Mapping)...' : state.batchStatus
+        runningProjects: { ...state.runningProjects, [projId!]: 'mapping' as const }
       }));
+      get().updateGeneratingFlags(projId!);
+      if (get().currentProject.id === projId) {
+        set({ batchStatus: 'Đang tạo phân cảnh (Scene Mapping)...' });
+      }
 
       try {
         const { scenes } = await executeSceneMappingIncrementalFlow(
@@ -3976,11 +4070,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
         // 2. Image Prompts
         set((state) => ({
-          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' },
-          isGeneratingSceneMapping: false,
-          isGeneratingImagePrompts: get().currentProject.id === projId ? true : state.isGeneratingImagePrompts,
-          batchStatus: get().currentProject.id === projId ? 'Đang tạo các prompt vẽ ảnh phân cảnh...' : state.batchStatus
+          runningProjects: { ...state.runningProjects, [projId!]: 'prompts' as const }
         }));
+        get().updateGeneratingFlags(projId!);
+        if (get().currentProject.id === projId) {
+          set({ batchStatus: 'Đang tạo các prompt vẽ ảnh phân cảnh...' });
+        }
 
         await executeImagePromptsContextualFlow(
           projId!,
@@ -3993,12 +4088,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         );
 
         // 3. Generate Reference Images (Assets)
+        set((state) => ({
+          runningProjects: { ...state.runningProjects, [projId!]: 'assets' as const }
+        }));
+        get().updateGeneratingFlags(projId!);
         if (get().currentProject.id === projId) {
-          set({ 
-            batchStatus: 'Kiểm tra ảnh tham chiếu nhân vật/bối cảnh...',
-            isGeneratingImagePrompts: false,
-            isGeneratingAssets: true 
-          });
+          set({ batchStatus: 'Kiểm tra ảnh tham chiếu nhân vật/bối cảnh...' });
         }
 
         let missingAssetsToGen = {
@@ -4060,14 +4155,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             characters: updatedProj.characters || [],
             exteriors: updatedProj.exteriors || [],
             props: updatedProj.props || [],
-            isGeneratingAssets: false,
             currentProject: {
               ...state.currentProject,
               characters: updatedProj.characters || [],
               exteriors: updatedProj.exteriors || [],
               props: updatedProj.props || [],
-              sceneMapping: state.currentProject.sceneMapping.length > 0 ? state.currentProject.sceneMapping : (updatedProj.sceneMapping || []),
-              imagePrompts: state.currentProject.imagePrompts.length > 0 ? state.currentProject.imagePrompts : (updatedProj.imagePrompts || [])
+              sceneMapping: (state.currentProject?.sceneMapping || []).length > 0 ? state.currentProject.sceneMapping : (updatedProj.sceneMapping || []),
+              imagePrompts: (state.currentProject?.imagePrompts || []).length > 0 ? state.currentProject.imagePrompts : (updatedProj.imagePrompts || [])
             }
           }));
         }
@@ -4089,10 +4183,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
 
         if (sttToGenShots.length > 0) {
+          set((state) => ({
+            runningProjects: { ...state.runningProjects, [projId!]: 'shots' as const }
+          }));
+          get().updateGeneratingFlags(projId!);
           if (get().currentProject.id === projId) {
             set({ 
-              batchStatus: `Bắt đầu vẽ ${sttToGenShots.length} ảnh phân cảnh (Shots)...`,
-              isGeneratingAssets: false
+              batchStatus: `Bắt đầu vẽ ${sttToGenShots.length} ảnh phân cảnh (Shots)...`
             });
           }
           await get().startBatchShotGeneration(sttToGenShots);
@@ -4132,6 +4229,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           .map((p: any) => p.stt);
 
         if (sttToGenVideos.length > 0) {
+          set((state) => ({
+            runningProjects: { ...state.runningProjects, [projId!]: 'video' as const }
+          }));
+          get().updateGeneratingFlags(projId!);
           if (get().currentProject.id === projId) {
             set({ batchStatus: `Bắt đầu tạo ${sttToGenVideos.length} video phân cảnh...` });
           }
@@ -4166,6 +4267,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const finalProj = await getProject(projId!);
         if (!finalProj) throw new Error('Không thể tải dữ liệu dự án để biên dịch video.');
 
+        set((state) => ({
+          runningProjects: { ...state.runningProjects, [projId!]: 'export' as const }
+        }));
+        get().updateGeneratingFlags(projId!);
         if (get().currentProject.id === projId) {
           set({ batchStatus: 'Đang khởi chạy tiến trình xuất phim (.mp4) tổng hợp...' });
         }
@@ -4250,17 +4355,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set((state) => {
           const updatedRunning = { ...state.runningProjects };
           delete updatedRunning[projId!];
+          const updatedCombos = { ...state.runningCombos };
+          delete updatedCombos[projId!];
           return {
             runningProjects: updatedRunning,
-            isGeneratingSceneMapping: false,
-            isGeneratingImagePrompts: false,
-            isGeneratingAssets: false,
-            isGeneratingFullCombo: false,
+            runningCombos: updatedCombos,
             mappingAbortController: null,
             promptsAbortController: null,
             assetAbortController: null
           };
         });
+        get().updateGeneratingFlags(projId!);
       }
     };
 

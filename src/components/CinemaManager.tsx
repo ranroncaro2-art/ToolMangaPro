@@ -26,7 +26,13 @@ import {
   Music,
   RefreshCw,
   Copy,
-  Check
+  Check,
+  X,
+  Plus,
+  Trash2,
+  Scissors,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 // Time parser helper
@@ -50,9 +56,10 @@ function parseTimestampToSeconds(ts: string): number {
 }
 
 // Subtitle range parser (e.g. "12-18" or "12")
-function getSubtitlesForScene(subtitleRange: string, blocks: SubtitleBlock[]): SubtitleBlock[] {
+function getSubtitlesForScene(subtitleRange: any, blocks: SubtitleBlock[]): SubtitleBlock[] {
   if (!subtitleRange) return [];
-  const parts = subtitleRange.split('-').map(x => parseInt(x.trim(), 10));
+  const rangeStr = String(subtitleRange);
+  const parts = rangeStr.split('-').map(x => parseInt(x.trim(), 10));
   if (parts.length === 1 && !isNaN(parts[0])) {
     const id = parts[0];
     return blocks.filter(b => {
@@ -207,8 +214,8 @@ function wrapSubtitleText(text: string, maxLineLength: number = 38): string {
   return lines.join('\n');
 }
 
-function pathGetFilename(p: string): string {
-  if (!p) return '';
+function pathGetFilename(p: any): string {
+  if (!p || typeof p !== 'string') return '';
   return p.substring(p.lastIndexOf('\\') + 1).substring(p.lastIndexOf('/') + 1);
 }
 
@@ -253,6 +260,7 @@ interface SceneTimeInfo {
   imageUrl?: string;
   sceneDescription: string;
   mainSituation: string;
+  isHook?: boolean;
 }
 
 interface BgmSegmentCardProps {
@@ -543,10 +551,10 @@ export default function CinemaManager() {
 
   // Trigger BGM scanning when active project or directory changes
   useEffect(() => {
-    if (currentProject.id && currentProject.videoSaveDir) {
+    if (currentProject?.id && currentProject?.videoSaveDir) {
       scanLocalBgmFiles();
     }
-  }, [currentProject.id, currentProject.videoSaveDir, scanLocalBgmFiles]);
+  }, [currentProject?.id, currentProject?.videoSaveDir, scanLocalBgmFiles]);
 
   // Subtitle Customization State
   const [fontSize, setFontSize] = useState<number>(24);
@@ -591,6 +599,13 @@ export default function CinemaManager() {
   });
 
   const [showExportConfig, setShowExportConfig] = useState(false);
+
+  // Hook Creator State
+  const [showHookModal, setShowHookModal] = useState<boolean>(false);
+  const [hookIsPlaying, setHookIsPlaying] = useState<boolean>(false);
+  const [hookCurrentTime, setHookCurrentTime] = useState<number>(0);
+  const [hookBgmPath, setHookBgmPath] = useState<string | null>(null);
+
   const [videoType, setVideoType] = useState<'mixed' | 'images_only' | 'videos_only'>('mixed');
   const [voiceDir, setVoiceDir] = useState('');
   const [isFolderPickerOpen, setIsFolderPickerOpen] = useState(false);
@@ -610,7 +625,7 @@ export default function CinemaManager() {
   });
 
   const validateAssets = async (typeToValidate = videoType) => {
-    if (!currentProject.id || !currentProject.videoSaveDir) return;
+    if (!currentProject?.id || !currentProject?.videoSaveDir) return;
     setValidationStatus({ isValidating: true, success: null, message: '', errors: [] });
     try {
       const response = await fetch('/api/video/export', {
@@ -619,16 +634,17 @@ export default function CinemaManager() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          projectId: currentProject.id,
-          projectName: currentProject.name,
-          sceneMapping: currentProject.sceneMapping,
-          imagePrompts: currentProject.imagePrompts,
+          projectId: currentProject?.id,
+          projectName: currentProject?.name,
+          sceneMapping: currentProject?.sceneMapping,
+          imagePrompts: currentProject?.imagePrompts,
           srtContent: srtBlocks.map(b => `${b.id}\n${b.startTime} --> ${b.endTime}\n${b.text}`).join('\n\n'),
-          videoSaveDir: currentProject.videoSaveDir,
+          videoSaveDir: currentProject?.videoSaveDir,
           videoType: typeToValidate,
-          bgmVolumeDb: currentProject.bgmVolumeDb ?? -18,
-          bgmSuggestions: currentProject.bgmSuggestions || [],
-          validateOnly: true
+          bgmVolumeDb: currentProject?.bgmVolumeDb ?? -18,
+          bgmSuggestions: currentProject?.bgmSuggestions || [],
+          validateOnly: true,
+          hookSegments: currentProject?.hookSegments || []
         })
       });
       
@@ -659,10 +675,10 @@ export default function CinemaManager() {
   };
 
   useEffect(() => {
-    if (showExportConfig && currentProject.id && currentProject.videoSaveDir) {
+    if (showExportConfig && currentProject?.id && currentProject?.videoSaveDir) {
       validateAssets(videoType);
     }
-  }, [showExportConfig, videoType, currentProject.id, currentProject.videoSaveDir]);
+  }, [showExportConfig, videoType, currentProject?.id, currentProject?.videoSaveDir]);
 
   // Parse SRT Blocks and split long sentences into sequential subtitles
   const srtBlocks = useMemo(() => {
@@ -720,7 +736,8 @@ export default function CinemaManager() {
 
   // Resume polling on mount if export is running on server
   useEffect(() => {
-    if (!currentProject.id) return;
+    const projId = currentProject?.id;
+    if (!projId) return;
     
     let activeInterval: NodeJS.Timeout | null = null;
     
@@ -728,7 +745,7 @@ export default function CinemaManager() {
       if (activeInterval) clearInterval(activeInterval);
       activeInterval = setInterval(async () => {
         try {
-          const res = await fetch(`/api/video/export?projectId=${currentProject.id}`);
+          const res = await fetch(`/api/video/export?projectId=${projId}`);
           if (!res.ok) return;
           const data = await res.json();
           
@@ -757,7 +774,7 @@ export default function CinemaManager() {
 
     const checkStatus = async () => {
       try {
-        const res = await fetch(`/api/video/export?projectId=${currentProject.id}`);
+        const res = await fetch(`/api/video/export?projectId=${projId}`);
         if (!res.ok) return;
         const data = await res.json();
         
@@ -784,29 +801,35 @@ export default function CinemaManager() {
     return () => {
       if (activeInterval) clearInterval(activeInterval);
     };
-  }, [currentProject.id]);
+  }, [currentProject?.id]);
 
   // Sync voiceDir with currentProject.videoSaveDir
   useEffect(() => {
-    if (currentProject.videoSaveDir) {
-      const computedVoiceDir = currentProject.videoSaveDir.endsWith('\\') || currentProject.videoSaveDir.endsWith('/')
-        ? currentProject.videoSaveDir + 'voice'
-        : currentProject.videoSaveDir + '\\voice';
+    const saveDir = currentProject?.videoSaveDir;
+    if (saveDir) {
+      const computedVoiceDir = saveDir.endsWith('\\') || saveDir.endsWith('/')
+        ? saveDir + 'voice'
+        : saveDir + '\\voice';
       setVoiceDir(computedVoiceDir);
     } else {
       setVoiceDir('');
     }
-  }, [currentProject.videoSaveDir]);
+  }, [currentProject?.videoSaveDir]);
 
   const loadVoiceFiles = async (): Promise<{ path: string; duration: number }[]> => {
-    if (!currentProject.videoSaveDir) {
+    if (!currentProject?.videoSaveDir) {
       setVoiceFiles([]);
       return [];
     }
     try {
-      const voicePath = currentProject.videoSaveDir.endsWith('\\') || currentProject.videoSaveDir.endsWith('/')
-        ? currentProject.videoSaveDir + 'voice'
-        : currentProject.videoSaveDir + '\\voice';
+      const saveDir = currentProject?.videoSaveDir;
+      if (!saveDir) {
+        setVoiceFiles([]);
+        return [];
+      }
+      const voicePath = saveDir.endsWith('\\') || saveDir.endsWith('/')
+        ? saveDir + 'voice'
+        : saveDir + '\\voice';
       
       const url = `/api/video/select-directory?path=${encodeURIComponent(voicePath)}`;
       const res = await fetch(url);
@@ -817,7 +840,10 @@ export default function CinemaManager() {
         const audioExts = ['.mp3', '.wav', '.m4a', '.ogg', '.aac', '.flac'];
         const mp3s = data.files
           .filter((f: any) => {
-            const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+            if (!f || !f.name || typeof f.name !== 'string') return false;
+            const dotIdx = f.name.lastIndexOf('.');
+            if (dotIdx === -1) return false;
+            const ext = f.name.substring(dotIdx).toLowerCase();
             return audioExts.includes(ext);
           })
           .map((f: any) => ({
@@ -825,7 +851,7 @@ export default function CinemaManager() {
             duration: f.duration || 5.0
           }));
         const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-        const sorted = mp3s.sort((a: any, b: any) => collator.compare(pathGetFilename(a.path), pathGetFilename(b.path)));
+        const sorted = mp3s.sort((a: any, b: any) => collator.compare(pathGetFilename(a?.path), pathGetFilename(b?.path)));
         setVoiceFiles(sorted);
         return sorted;
       } else {
@@ -842,7 +868,7 @@ export default function CinemaManager() {
   // Fetch voice files when folder changes
   useEffect(() => {
     loadVoiceFiles();
-  }, [currentProject.videoSaveDir]);
+  }, [currentProject?.videoSaveDir]);
 
   const preloadAllVoiceFiles = async (filesToLoad?: { path: string; duration: number }[]) => {
     const targetFiles = filesToLoad || voiceFiles;
@@ -976,7 +1002,7 @@ export default function CinemaManager() {
   const handleExportVideo = async (selectedVideoType: string, selectedVoiceDir: string) => {
     if (isExporting) return;
 
-    const saveDir = currentProject.videoSaveDir;
+    const saveDir = currentProject?.videoSaveDir;
     if (!saveDir) {
       alert('Vui lòng thiết lập "Thư mục lưu video trên máy tính" trong tab "1. Cấu hình dự án" trước khi xuất phim!');
       return;
@@ -998,10 +1024,10 @@ export default function CinemaManager() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          projectId: currentProject.id,
-          projectName: currentProject.name,
-          sceneMapping: currentProject.sceneMapping,
-          imagePrompts: currentProject.imagePrompts,
+          projectId: currentProject?.id,
+          projectName: currentProject?.name,
+          sceneMapping: currentProject?.sceneMapping,
+          imagePrompts: currentProject?.imagePrompts,
           srtContent: srtBlocks.map(b => `${b.id}\n${b.startTime} --> ${b.endTime}\n${b.text}`).join('\n\n'),
           style: {
             fontSize,
@@ -1015,9 +1041,10 @@ export default function CinemaManager() {
           videoSaveDir: saveDir,
           videoType: selectedVideoType,
           voiceDir: selectedVoiceDir,
-          bgmVolumeDb: currentProject.bgmVolumeDb ?? -18,
-          bgmSuggestions: currentProject.bgmSuggestions || [],
-          burnSubtitles: burnSubtitles
+          bgmVolumeDb: currentProject?.bgmVolumeDb ?? -18,
+          bgmSuggestions: currentProject?.bgmSuggestions || [],
+          burnSubtitles: burnSubtitles,
+          hookSegments: currentProject?.hookSegments || []
         })
       });
 
@@ -1073,10 +1100,15 @@ export default function CinemaManager() {
     const mappings = currentProject?.sceneMapping || [];
     const prompts = currentProject?.imagePrompts || [];
     const list: SceneTimeInfo[] = [];
+    const selected = currentProject?.hookSegments || [];
     let currentOffset = 0;
+    let idx = 0;
 
-    for (let i = 0; i < mappings.length; i++) {
-      const scene = mappings[i];
+    // A. Hook segments
+    for (let i = 0; i < selected.length; i++) {
+      const stt = selected[i];
+      const scene = mappings.find(m => m.stt === stt);
+      if (!scene) continue;
       const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
       const sceneStart = parseTimestampToSeconds(startStr);
       const sceneEnd = parseTimestampToSeconds(endStr);
@@ -1084,7 +1116,7 @@ export default function CinemaManager() {
       const promptRow = prompts.find(p => p.stt === scene.stt);
 
       list.push({
-        index: i,
+        index: idx++,
         stt: scene.stt,
         timeRange: scene.timeRange,
         subtitleRange: scene.subtitleRange,
@@ -1095,14 +1127,43 @@ export default function CinemaManager() {
         videoUrl: promptRow?.videoUrl,
         imageUrl: promptRow?.imageUrl,
         sceneDescription: scene.sceneDescription,
-        mainSituation: scene.mainSituation
+        mainSituation: scene.mainSituation,
+        isHook: true
+      });
+
+      currentOffset += origDuration;
+    }
+
+    // B. Main video segments
+    for (let i = 0; i < mappings.length; i++) {
+      const scene = mappings[i];
+      const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
+      const sceneStart = parseTimestampToSeconds(startStr);
+      const sceneEnd = parseTimestampToSeconds(endStr);
+      const origDuration = Math.max(0.5, sceneEnd - sceneStart);
+      const promptRow = prompts.find(p => p.stt === scene.stt);
+
+      list.push({
+        index: idx++,
+        stt: scene.stt,
+        timeRange: scene.timeRange,
+        subtitleRange: scene.subtitleRange,
+        sceneStart,
+        sceneEnd,
+        targetDuration: origDuration,
+        playerStartOffset: currentOffset,
+        videoUrl: promptRow?.videoUrl,
+        imageUrl: promptRow?.imageUrl,
+        sceneDescription: scene.sceneDescription,
+        mainSituation: scene.mainSituation,
+        isHook: false
       });
 
       currentOffset += origDuration;
     }
 
     return list;
-  }, [currentProject?.sceneMapping, currentProject?.imagePrompts]);
+  }, [currentProject?.sceneMapping, currentProject?.imagePrompts, currentProject?.hookSegments]);
 
   const totalDuration = useMemo(() => {
     if (scenesInfo.length === 0) return 0;
@@ -1124,19 +1185,66 @@ export default function CinemaManager() {
     return Math.max(0, currentTime - activeScene.playerStartOffset);
   }, [activeScene, currentTime]);
 
-  // Extract Subtitle matching current time (based on original timestamps since audio duration = sub duration)
-  const activeSubtitle = useMemo<SubtitleBlock | null>(() => {
-    if (srtBlocks.length === 0) return null;
+  // Shifted Subtitles list for main preview player
+  const shiftedSubtitles = useMemo(() => {
+    const list: { id: number; text: string; shiftedStart: number; shiftedEnd: number }[] = [];
+    const selected = currentProject?.hookSegments || [];
+    const mappings = currentProject?.sceneMapping || [];
+    
+    let D_hook = 0;
+    
+    // A. Hook subtitles
+    for (let hookIdx = 0; hookIdx < selected.length; hookIdx++) {
+      const stt = selected[hookIdx];
+      const scene = mappings.find(m => m.stt === stt);
+      if (!scene) continue;
+      
+      const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
+      const sceneStart = parseTimestampToSeconds(startStr);
+      const sceneEnd = parseTimestampToSeconds(endStr);
+      const origDuration = Math.max(0.5, sceneEnd - sceneStart);
+      
+      const subs = getSubtitlesForScene(scene.subtitleRange, srtBlocks);
+      for (const sub of subs) {
+        const s_start = parseTimestampToSeconds(sub.startTime);
+        const s_end = parseTimestampToSeconds(sub.endTime);
+        const rel_start = s_start - sceneStart;
+        const rel_end = s_end - sceneStart;
+        
+        list.push({
+          id: sub.id,
+          text: sub.text,
+          shiftedStart: D_hook + rel_start,
+          shiftedEnd: D_hook + rel_end
+        });
+      }
+      
+      D_hook += origDuration;
+    }
+    
+    // B. Main video subtitles
+    for (const sub of srtBlocks) {
+      const s_start = parseTimestampToSeconds(sub.startTime);
+      const s_end = parseTimestampToSeconds(sub.endTime);
+      list.push({
+        id: sub.id,
+        text: sub.text,
+        shiftedStart: D_hook + s_start,
+        shiftedEnd: D_hook + s_end
+      });
+    }
+    
+    return list;
+  }, [currentProject?.hookSegments, currentProject?.sceneMapping, srtBlocks]);
 
-    // Find the subtitle that currently matches currentTime
-    const found = srtBlocks.find(sub => {
-      const start = parseTimestampToSeconds(sub.startTime);
-      const end = parseTimestampToSeconds(sub.endTime);
-      return currentTime >= start && currentTime <= end;
+  // Extract Subtitle matching current time (based on shifted timelines)
+  const activeSubtitle = useMemo<any | null>(() => {
+    if (shiftedSubtitles.length === 0) return null;
+    const found = shiftedSubtitles.find(sub => {
+      return currentTime >= sub.shiftedStart && currentTime <= sub.shiftedEnd;
     });
-
     return found || null;
-  }, [srtBlocks, currentTime]);
+  }, [shiftedSubtitles, currentTime]);
 
   // Auto-wrap active subtitle text
   const wrappedSubtitleText = useMemo(() => {
@@ -1214,7 +1322,7 @@ export default function CinemaManager() {
   }, []);
 
   // Sync BGM volume (convert dB to linear)
-  const bgmVolumeDb = currentProject.bgmVolumeDb ?? -18;
+  const bgmVolumeDb = currentProject?.bgmVolumeDb ?? -18;
   useEffect(() => {
     const bgmAudio = bgmAudioObjRef.current;
     if (!bgmAudio) return;
@@ -1222,10 +1330,36 @@ export default function CinemaManager() {
     bgmAudio.volume = Math.max(0, Math.min(1, linearVol));
   }, [bgmVolumeDb]);
 
-  // Helper to parse BGM timeRanges (e.g. "00:00 - 04:00")
+  // Helper to parse BGM timeRanges (e.g. "00:00 - 04:00") and shift them relative to the hook
   const bgmSegmentsParsed = useMemo(() => {
-    const suggestions = currentProject.bgmSuggestions || [];
-    return suggestions.map((bgm) => {
+    const suggestions = currentProject?.bgmSuggestions || [];
+    const list: any[] = [];
+    
+    const selected = currentProject?.hookSegments || [];
+    const mappings = currentProject?.sceneMapping || [];
+    let D_hook = 0;
+    for (const stt of selected) {
+      const scene = mappings.find(m => m.stt === stt);
+      if (!scene) continue;
+      const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
+      D_hook += Math.max(0.5, parseTimestampToSeconds(endStr) - parseTimestampToSeconds(startStr));
+    }
+    
+    // A. Prepend Hook BGM Suggestion if hookBgmPath exists
+    if (hookBgmPath && D_hook > 0) {
+      list.push({
+        id: -100, // custom unique ID
+        timeRange: `00:00 - ${D_hook.toFixed(1)}`,
+        audioFile: hookBgmPath.substring(Math.max(hookBgmPath.lastIndexOf('\\'), hookBgmPath.lastIndexOf('/')) + 1), // filename only
+        start: 0,
+        end: D_hook,
+        isHookBgm: true,
+        bgmName: 'Hook BGM'
+      });
+    }
+    
+    // B. Main BGM segments shifted by D_hook
+    for (const bgm of suggestions) {
       const parts = (bgm.timeRange || '').split('-').map((p) => p.trim());
       let start = 0;
       let end = 0;
@@ -1243,13 +1377,16 @@ export default function CinemaManager() {
         start = parseTimeStr(parts[0]);
         end = parseTimeStr(parts[1]);
       }
-      return {
+      
+      list.push({
         ...bgm,
-        start,
-        end
-      };
-    });
-  }, [currentProject.bgmSuggestions]);
+        start: D_hook + start,
+        end: D_hook + end
+      });
+    }
+    
+    return list;
+  }, [currentProject?.bgmSuggestions, currentProject?.hookSegments, currentProject?.sceneMapping, hookBgmPath]);
 
   // Find the active BGM segment based on currentTime
   const activeBgmSegment = useMemo(() => {
@@ -1271,8 +1408,19 @@ export default function CinemaManager() {
       return;
     }
 
+    // Apply BGM volume and fadeout
+    const linearVol = Math.pow(10, bgmVolumeDb / 20);
+    if (activeBgmSegment.isHookBgm) {
+      const D_hook = activeBgmSegment.end;
+      const isFading = currentTime >= D_hook - 2.0 && D_hook > 0;
+      const fadeFactor = isFading ? Math.max(0.0, (D_hook - currentTime) / 2.0) : 1.0;
+      bgmAudio.volume = Math.max(0, Math.min(1, linearVol * fadeFactor));
+    } else {
+      bgmAudio.volume = Math.max(0, Math.min(1, linearVol));
+    }
+
     const bgmFileName = activeBgmSegment.audioFile;
-    const projectSaveDir = currentProject.videoSaveDir || '';
+    const projectSaveDir = currentProject?.videoSaveDir || '';
     const sep = projectSaveDir.includes('/') ? '/' : '\\';
     const bgmFilePath = `${projectSaveDir.replace(/[\\/]+$/, '')}${sep}bgm${sep}${bgmFileName}`;
     const bgmAudioUrl = `/api/video/serve-file?path=${encodeURIComponent(bgmFilePath)}`;
@@ -1315,7 +1463,7 @@ export default function CinemaManager() {
         }
       }
     }
-  }, [isPlaying, activeBgmSegment, currentProject.videoSaveDir, currentTime]);
+  }, [isPlaying, activeBgmSegment, currentProject?.videoSaveDir, currentTime, bgmVolumeDb]);
 
   // Sync mute and rate
   useEffect(() => {
@@ -1343,14 +1491,8 @@ export default function CinemaManager() {
     const cachedUrl = voiceBlobUrls[voicePath];
     const audioUrl = cachedUrl || `/api/video/serve-file?path=${encodeURIComponent(voicePath)}`;
 
-    // Calculate elapsed time within the original subtitle block (using original timeline)
-    const origId = activeSubtitle.id >= 1000 ? Math.floor(activeSubtitle.id / 1000) : activeSubtitle.id;
-    const firstPart = srtBlocks.find(b => {
-      const bOrigId = b.id >= 1000 ? Math.floor(b.id / 1000) : b.id;
-      return bOrigId === origId;
-    });
-    const origBlockStart = firstPart ? parseTimestampToSeconds(firstPart.startTime) : 0;
-    const elapsed = Math.max(0, currentTime - origBlockStart);
+    // Calculate elapsed time within the shifted subtitle block
+    const elapsed = Math.max(0, currentTime - activeSubtitle.shiftedStart);
 
     if (lastActiveVoicePathRef.current !== voicePath) {
       lastActiveVoicePathRef.current = voicePath;
@@ -1642,6 +1784,450 @@ export default function CinemaManager() {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+
+  
+
+  // Scan hook bgm file
+  const scanHookBgm = async () => {
+    const saveDir = currentProject?.videoSaveDir;
+    if (!saveDir) return;
+    try {
+      const bgmPath = saveDir.endsWith('\\') || saveDir.endsWith('/')
+        ? saveDir + 'bgm'
+        : saveDir + '\\bgm';
+      const url = `/api/video/select-directory?path=${encodeURIComponent(bgmPath)}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && data.files) {
+        const audioExts = ['.mp3', '.wav', '.m4a', '.ogg', '.aac', '.flac'];
+        const found = data.files.find((f: any) => {
+          if (!f || !f.name || typeof f.name !== 'string') return false;
+          const dotIdx = f.name.lastIndexOf('.');
+          if (dotIdx === -1) return false;
+          const nameWithoutExt = f.name.substring(0, dotIdx).toLowerCase();
+          const ext = f.name.substring(dotIdx).toLowerCase();
+          return nameWithoutExt === 'hook_bgm' && audioExts.includes(ext);
+        });
+        if (found) {
+          setHookBgmPath(found.path);
+        } else {
+          setHookBgmPath(null);
+        }
+      }
+    } catch (e) {
+      console.error('Error scanning hook bgm:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (showHookModal) {
+      scanHookBgm();
+    }
+  }, [showHookModal, currentProject?.videoSaveDir]);
+
+  // Hook segments timeline calculation
+  const hookTimelineSegments = useMemo(() => {
+    const selected = currentProject?.hookSegments || [];
+    const mappings = currentProject?.sceneMapping || [];
+    const prompts = currentProject?.imagePrompts || [];
+    const list: any[] = [];
+    let currentOffset = 0;
+
+    for (const stt of selected) {
+      const scene = mappings.find(m => m.stt === stt);
+      if (!scene) continue;
+      const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
+      const sceneStart = parseTimestampToSeconds(startStr);
+      const sceneEnd = parseTimestampToSeconds(endStr);
+      const origDuration = Math.max(0.5, sceneEnd - sceneStart);
+      const promptRow = prompts.find(p => p.stt === scene.stt);
+      const subs = getSubtitlesForScene(scene.subtitleRange, srtBlocks);
+
+      list.push({
+        stt,
+        sceneStart,
+        sceneEnd,
+        targetDuration: origDuration,
+        startOffset: currentOffset,
+        endOffset: currentOffset + origDuration,
+        videoUrl: promptRow?.videoUrl,
+        imageUrl: promptRow?.imageUrl,
+        subtitles: subs
+      });
+
+      currentOffset += origDuration;
+    }
+
+    return list;
+  }, [currentProject?.hookSegments, currentProject?.sceneMapping, currentProject?.imagePrompts, srtBlocks]);
+
+  const totalHookDuration = useMemo(() => {
+    if (hookTimelineSegments.length === 0) return 0;
+    const lastSeg = hookTimelineSegments[hookTimelineSegments.length - 1];
+    return lastSeg.endOffset;
+  }, [hookTimelineSegments]);
+
+  const activeHookSegment = useMemo(() => {
+    if (hookTimelineSegments.length === 0) return null;
+    const found = hookTimelineSegments.find(
+      s => hookCurrentTime >= s.startOffset && hookCurrentTime < s.endOffset
+    );
+    return found || hookTimelineSegments[hookTimelineSegments.length - 1];
+  }, [hookTimelineSegments, hookCurrentTime]);
+
+  const activeHookSubtitle = useMemo(() => {
+    if (!activeHookSegment || !activeHookSegment.subtitles || activeHookSegment.subtitles.length === 0) return null;
+    const t_rel = hookCurrentTime - activeHookSegment.startOffset;
+    const absTime = activeHookSegment.sceneStart + t_rel;
+    return (activeHookSegment.subtitles || []).find((sub: any) => {
+      const start = parseTimestampToSeconds(sub.startTime);
+      const end = parseTimestampToSeconds(sub.endTime);
+      return absTime >= start && absTime <= end;
+    }) || null;
+  }, [activeHookSegment, hookCurrentTime]);
+
+  // Hook Audio Playback Engine
+  const hookAudioObjRef = useRef<HTMLAudioElement | null>(null);
+  const lastActiveHookVoicePathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio();
+    hookAudioObjRef.current = audio;
+    return () => {
+      audio.pause();
+      hookAudioObjRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const audio = hookAudioObjRef.current;
+    if (!audio) return;
+
+    if (!hookIsPlaying || !activeHookSubtitle || !subToVoiceMap[activeHookSubtitle.id]) {
+      audio.pause();
+      if (!activeHookSubtitle) {
+        lastActiveHookVoicePathRef.current = null;
+      }
+      return;
+    }
+
+    const voicePath = subToVoiceMap[activeHookSubtitle.id].path;
+    const cachedUrl = voiceBlobUrls[voicePath];
+    const audioUrl = cachedUrl || `/api/video/serve-file?path=${encodeURIComponent(voicePath)}`;
+
+    // Calculate elapsed time in sub
+    const origId = activeHookSubtitle.id >= 1000 ? Math.floor(activeHookSubtitle.id / 1000) : activeHookSubtitle.id;
+    const firstPart = srtBlocks.find(b => {
+      const bOrigId = b.id >= 1000 ? Math.floor(b.id / 1000) : b.id;
+      return bOrigId === origId;
+    });
+    const origBlockStart = firstPart ? parseTimestampToSeconds(firstPart.startTime) : 0;
+    
+    // Time on original timeline
+    const t_rel = hookCurrentTime - (activeHookSegment?.startOffset || 0);
+    const absTime = (activeHookSegment?.sceneStart || 0) + t_rel;
+    const elapsed = Math.max(0, absTime - origBlockStart);
+
+    // Apply fadeout to voice if in last 2s of hook
+    const isFading = hookCurrentTime >= totalHookDuration - 2.0 && totalHookDuration > 0;
+    const fadeFactor = isFading ? Math.max(0.0, (totalHookDuration - hookCurrentTime) / 2.0) : 1.0;
+    audio.volume = fadeFactor;
+
+    if (lastActiveHookVoicePathRef.current !== voicePath) {
+      lastActiveHookVoicePathRef.current = voicePath;
+      audio.src = audioUrl;
+      audio.load();
+
+      const playAudio = () => {
+        if (elapsed > 0.1) {
+          audio.currentTime = elapsed;
+        }
+        audio.play().catch(err => {
+          if (err.name !== 'AbortError') console.log('Hook voice play error:', err);
+        });
+      };
+
+      if (audio.readyState >= 1) {
+        playAudio();
+      } else {
+        audio.onloadedmetadata = playAudio;
+      }
+    } else {
+      if (audio.paused && hookIsPlaying && !audio.ended) {
+        audio.play().catch(err => {
+          if (err.name !== 'AbortError') console.log('Hook voice play error:', err);
+        });
+      }
+      
+      const drift = Math.abs(audio.currentTime - elapsed);
+      if (drift > 0.5 && !audio.seeking && audio.readyState >= 2 && !audio.paused) {
+        audio.currentTime = elapsed;
+      }
+    }
+  }, [hookIsPlaying, activeHookSubtitle, subToVoiceMap, hookCurrentTime, activeHookSegment, voiceBlobUrls, totalHookDuration]);
+
+  // Hook BGM Audio Playback Engine
+  const hookBgmAudioObjRef = useRef<HTMLAudioElement | null>(null);
+  const lastActiveHookBgmRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const bgm = new Audio();
+    bgm.loop = true;
+    hookBgmAudioObjRef.current = bgm;
+    return () => {
+      bgm.pause();
+      hookBgmAudioObjRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const bgm = hookBgmAudioObjRef.current;
+    if (!bgm) return;
+
+    if (!hookIsPlaying || !hookBgmPath) {
+      bgm.pause();
+      if (!hookBgmPath) {
+        lastActiveHookBgmRef.current = null;
+      }
+      return;
+    }
+
+    const linearVol = Math.pow(10, bgmVolumeDb / 20);
+    const isFading = hookCurrentTime >= totalHookDuration - 2.0 && totalHookDuration > 0;
+    const fadeFactor = isFading ? Math.max(0.0, (totalHookDuration - hookCurrentTime) / 2.0) : 1.0;
+    bgm.volume = Math.max(0, Math.min(1, linearVol * fadeFactor));
+
+    const bgmUrl = `/api/video/serve-file?path=${encodeURIComponent(hookBgmPath)}`;
+
+    if (lastActiveHookBgmRef.current !== hookBgmPath) {
+      lastActiveHookBgmRef.current = hookBgmPath;
+      bgm.src = bgmUrl;
+      bgm.load();
+
+      const playBgm = () => {
+        bgm.currentTime = hookCurrentTime % (bgm.duration || 5.0);
+        bgm.play().catch(err => {
+          if (err.name !== 'AbortError') console.log('Hook BGM play error:', err);
+        });
+      };
+
+      if (bgm.readyState >= 1) {
+        playBgm();
+      } else {
+        bgm.onloadedmetadata = playBgm;
+      }
+    } else {
+      if (bgm.paused && hookIsPlaying) {
+        bgm.play().catch(err => {
+          if (err.name !== 'AbortError') console.log('Hook BGM play error:', err);
+        });
+      }
+
+      if (bgm.duration) {
+        const targetTime = hookCurrentTime % bgm.duration;
+        const drift = Math.abs(bgm.currentTime - targetTime);
+        if (drift > 0.5 && !bgm.seeking && bgm.readyState >= 2 && !bgm.paused) {
+          bgm.currentTime = targetTime;
+        }
+      }
+    }
+  }, [hookIsPlaying, hookBgmPath, hookCurrentTime, bgmVolumeDb, totalHookDuration]);
+
+  // Hook Video Preview Engine
+  const hookVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [hookVideoLoaded, setHookVideoLoaded] = useState(false);
+
+  const handleHookMetadataLoaded = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (!activeHookSegment) return;
+    const video = e.currentTarget;
+    setHookVideoLoaded(true);
+
+    let rate = 1.0;
+    if (activeHookSegment.targetDuration >= 8 && video.duration) {
+      rate = video.duration / activeHookSegment.targetDuration;
+    }
+
+    const safeRate = Math.max(0.1, Math.min(16, rate));
+    video.playbackRate = safeRate;
+
+    const t_rel = Math.max(0, hookCurrentTime - activeHookSegment.startOffset);
+    const targetTime = t_rel * safeRate;
+    if (video.duration) {
+      video.currentTime = Math.max(0, Math.min(video.duration, targetTime));
+    } else {
+      video.currentTime = Math.max(0, targetTime);
+    }
+
+    if (hookIsPlaying) {
+      video.play().catch(err => {
+        if (err.name !== 'AbortError') console.log('Hook video play error:', err);
+      });
+    }
+  };
+
+  useEffect(() => {
+    const video = hookVideoRef.current;
+    if (!video || !hookVideoLoaded) return;
+    if (hookIsPlaying) {
+      video.play().catch(err => {
+        if (err.name !== 'AbortError') console.log('Hook video play sync error:', err);
+      });
+    } else {
+      video.pause();
+    }
+  }, [hookIsPlaying, activeHookSegment?.stt, hookVideoLoaded]);
+
+  useEffect(() => {
+    const video = hookVideoRef.current;
+    if (video) {
+      if (video.readyState >= 1) {
+        setHookVideoLoaded(true);
+      } else {
+        setHookVideoLoaded(false);
+      }
+    } else {
+      setHookVideoLoaded(false);
+    }
+  }, [activeHookSegment?.stt]);
+
+  // Hook Master Timer
+  useEffect(() => {
+    if (!hookIsPlaying) return;
+    if (hookTimelineSegments.length === 0) {
+      setHookIsPlaying(false);
+      return;
+    }
+
+    let lastTime = performance.now();
+    let frameId: number;
+
+    const tick = () => {
+      const now = performance.now();
+      const delta = (now - lastTime) / 1000;
+      lastTime = now;
+
+      const video = hookVideoRef.current;
+      const isVideoStillLoading = activeHookSegment?.videoUrl && !hookVideoLoaded;
+      const isVideoPlaying = activeHookSegment?.videoUrl && video && !video.paused && !video.ended && (video.currentTime < video.duration - 0.1);
+      const isVideoDriving = isVideoStillLoading || isVideoPlaying;
+
+      if (!isVideoDriving) {
+        setHookCurrentTime(prev => {
+          const nextVal = prev + delta;
+          if (activeHookSegment && nextVal >= activeHookSegment.startOffset + activeHookSegment.targetDuration) {
+            const nextIdx = hookTimelineSegments.indexOf(activeHookSegment) + 1;
+            if (nextIdx < hookTimelineSegments.length) {
+              return hookTimelineSegments[nextIdx].startOffset;
+            } else {
+              setHookIsPlaying(false);
+              return totalHookDuration;
+            }
+          }
+          return nextVal;
+        });
+      }
+
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
+  }, [hookIsPlaying, activeHookSegment, hookVideoLoaded, hookTimelineSegments, totalHookDuration]);
+
+  const handleHookTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (!hookIsPlaying || !activeHookSegment) return;
+    const video = e.currentTarget;
+    if (!video.duration) return;
+
+    let rate = 1.0;
+    if (activeHookSegment.targetDuration >= 8 && video.duration) {
+      rate = video.duration / activeHookSegment.targetDuration;
+    }
+
+    const elapsed = video.currentTime / rate;
+
+    if (elapsed >= activeHookSegment.targetDuration) {
+      const nextIdx = hookTimelineSegments.indexOf(activeHookSegment) + 1;
+      if (nextIdx < hookTimelineSegments.length) {
+        setHookCurrentTime(hookTimelineSegments[nextIdx].startOffset);
+      } else {
+        setHookIsPlaying(false);
+        setHookCurrentTime(totalHookDuration);
+      }
+    } else {
+      setHookCurrentTime(activeHookSegment.startOffset + elapsed);
+    }
+  };
+
+  const handleHookVideoEnded = () => {
+    if (!hookIsPlaying || !activeHookSegment) return;
+    const elapsed = hookCurrentTime - activeHookSegment.startOffset;
+    if (elapsed >= activeHookSegment.targetDuration - 0.1) {
+      const nextIdx = hookTimelineSegments.indexOf(activeHookSegment) + 1;
+      if (nextIdx < hookTimelineSegments.length) {
+        setHookCurrentTime(hookTimelineSegments[nextIdx].startOffset);
+      } else {
+        setHookIsPlaying(false);
+        setHookCurrentTime(totalHookDuration);
+      }
+    }
+  };
+
+  const toggleHookPlay = () => {
+    if (hookIsPlaying) {
+      setHookIsPlaying(false);
+    } else {
+      if (hookCurrentTime >= totalHookDuration - 0.1) {
+        setHookCurrentTime(0);
+      }
+      setHookIsPlaying(true);
+    }
+  };
+
+  const handleSelectHookSegment = (stt: number) => {
+    const selected = currentProject?.hookSegments || [];
+    const isSelected = selected.includes(stt);
+    let newSegs: number[];
+    if (isSelected) {
+      newSegs = selected.filter(x => x !== stt);
+    } else {
+      newSegs = [...selected, stt];
+    }
+    setCurrentProjectField('hookSegments', newSegs);
+  };
+
+  const handleMoveHookSegment = (index: number, direction: 'up' | 'down') => {
+    const selected = [...(currentProject?.hookSegments || [])];
+    if (direction === 'up' && index > 0) {
+      const temp = selected[index];
+      selected[index] = selected[index - 1];
+      selected[index - 1] = temp;
+    } else if (direction === 'down' && index < selected.length - 1) {
+      const temp = selected[index];
+      selected[index] = selected[index + 1];
+      selected[index + 1] = temp;
+    }
+    setCurrentProjectField('hookSegments', selected);
+  };
+
+  // Calculate total duration of the Hook segments
+  const D_hook = useMemo(() => {
+    const selected = currentProject?.hookSegments || [];
+    const mappings = currentProject?.sceneMapping || [];
+    let dur = 0;
+    for (const stt of selected) {
+      const scene = mappings.find(m => m.stt === stt);
+      if (!scene) continue;
+      const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
+      dur += Math.max(0.5, parseTimestampToSeconds(endStr) - parseTimestampToSeconds(startStr));
+    }
+    return dur;
+  }, [currentProject?.hookSegments, currentProject?.sceneMapping]);
+
+  const isHookFading = currentTime >= D_hook - 2.0 && currentTime < D_hook && D_hook > 0;
+  const hookFadeOpacity = isHookFading ? Math.max(0.0, (D_hook - currentTime) / 2.0) : 1.0;
+
   // Subtitle custom style object (scaled proportionally via container query width units 'cqw')
   const outlineCqw = outlineWidth / 8;
   const subtitleStyle: React.CSSProperties = {
@@ -1693,7 +2279,7 @@ export default function CinemaManager() {
           </div>
 
           {/* Preload Voice progress / button */}
-          {currentProject.videoSaveDir && (
+          {currentProject?.videoSaveDir && (
             <div className="flex items-center gap-2 bg-slate-950/60 border border-slate-900 px-3 py-1.5 rounded-xl ml-auto">
               <span className="text-[10px] text-slate-400 font-sans font-medium">Thuyết minh:</span>
               {preloadProgress.status === 'loading' ? (
@@ -1758,6 +2344,28 @@ export default function CinemaManager() {
           )}
 
           <button
+            onClick={() => {
+              setHookCurrentTime(0);
+              setHookIsPlaying(false);
+              setShowHookModal(true);
+            }}
+            disabled={isExporting}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition select-none cursor-pointer border shadow-lg active:scale-95 ${
+              isExporting
+                ? 'bg-slate-900 border-gray-800 text-gray-400'
+                : 'bg-slate-900/80 border-violet-850 hover:bg-slate-800 text-violet-300 hover:text-violet-200 shadow-violet-950/10'
+            }`}
+          >
+            <Scissors className="w-4 h-4" />
+            Tạo Hook
+            {(currentProject?.hookSegments || []).length > 0 && (
+              <span className="bg-violet-600 text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold ml-1 font-mono">
+                {(currentProject?.hookSegments || []).length}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => setShowExportConfig(true)}
             disabled={isExporting}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition select-none cursor-pointer shadow-lg active:scale-95 ${
@@ -1788,46 +2396,51 @@ export default function CinemaManager() {
             isFullscreen ? 'rounded-none border-0 w-screen h-screen' : ''
           }`}
         >
-          {activeScene ? (
-            activeScene.videoUrl ? (
-              // Video Player
-              <video
-                key={activeScene.stt}
-                ref={videoRef}
-                src={activeScene.videoUrl}
-                onLoadedMetadata={handleMetadataLoaded}
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={handleVideoEnded}
-                className="w-full h-full object-contain"
-                muted={isVideoMuted}
-                playsInline
-              />
-            ) : activeScene.imageUrl ? (
-              // Static Image Fallback with Ken Burns zoom effect
-              <div className="relative w-full h-full overflow-hidden flex items-center justify-center">
-                <img
-                  src={activeScene.imageUrl}
-                  alt={`Scene ${activeScene.stt}`}
-                  className={`w-full h-full object-contain ${
-                    isPlaying ? 'animate-ken-burns' : ''
-                  }`}
+          <div 
+            className="relative w-full h-full flex items-center justify-center transition-opacity"
+            style={{ opacity: hookFadeOpacity }}
+          >
+            {activeScene ? (
+              activeScene.videoUrl ? (
+                // Video Player
+                <video
+                  key={activeScene.stt}
+                  ref={videoRef}
+                  src={activeScene.videoUrl}
+                  onLoadedMetadata={handleMetadataLoaded}
+                  onTimeUpdate={handleTimeUpdate}
+                  onEnded={handleVideoEnded}
+                  className="w-full h-full object-contain"
+                  muted={isVideoMuted}
+                  playsInline
                 />
-                <div className="absolute top-4 left-4 bg-violet-950/80 backdrop-blur border border-violet-800/40 text-[10px] px-2.5 py-1 rounded-full text-violet-300 font-bold flex items-center gap-1.5 shadow">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Ảnh Tĩnh Fallback
+              ) : activeScene.imageUrl ? (
+                // Static Image Fallback with Ken Burns zoom effect
+                <div className="relative w-full h-full overflow-hidden flex items-center justify-center">
+                  <img
+                    src={activeScene.imageUrl}
+                    alt={`Scene ${activeScene.stt}`}
+                    className={`w-full h-full object-contain ${
+                      isPlaying ? 'animate-ken-burns' : ''
+                    }`}
+                  />
+                  <div className="absolute top-4 left-4 bg-violet-950/80 backdrop-blur border border-violet-800/40 text-[10px] px-2.5 py-1 rounded-full text-violet-300 font-bold flex items-center gap-1.5 shadow">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    Ảnh Tĩnh Fallback
+                  </div>
                 </div>
-              </div>
-            ) : (
-              // Missing Assets State
-              <div className="text-center p-6 text-gray-500 flex flex-col items-center gap-3">
-                <Film className="w-12 h-12 text-gray-700 animate-bounce" />
-                <div>
-                  <p className="text-sm font-bold text-slate-400">Phân cảnh #{activeScene.stt} chưa được tạo ảnh hoặc video</p>
-                  <p className="text-xs text-gray-600 mt-1">Trở lại Tab 5 & 6 để thiết kế và vẽ phân cảnh</p>
+              ) : (
+                // Missing Assets State
+                <div className="text-center p-6 text-gray-500 flex flex-col items-center gap-3">
+                  <Film className="w-12 h-12 text-gray-700 animate-bounce" />
+                  <div>
+                    <p className="text-sm font-bold text-slate-400">Phân cảnh #{activeScene.stt} chưa được tạo ảnh hoặc video</p>
+                    <p className="text-xs text-gray-600 mt-1">Trở lại Tab 5 & 6 để thiết kế và vẽ phân cảnh</p>
+                  </div>
                 </div>
-              </div>
-            )
-          ) : null}
+              )
+            ) : null}
+          </div>
 
           {/* Subtitle Overlay Overlay */}
           <div className="absolute inset-0 pointer-events-none flex flex-col p-6 z-10">
@@ -2383,7 +2996,7 @@ export default function CinemaManager() {
                   <Music className="w-4.5 h-4.5 text-violet-400" />
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Nhạc nền BGM</h3>
                 </div>
-                {currentProject.bgmSuggestions && currentProject.bgmSuggestions.length > 0 && (
+                {currentProject?.bgmSuggestions && currentProject?.bgmSuggestions.length > 0 && (
                   <button
                     onClick={generateBgmSuggestions}
                     disabled={isGeneratingBgmSuggestions}
@@ -2419,7 +3032,7 @@ export default function CinemaManager() {
             </div>
 
             {/* suggestions list */}
-            {(!currentProject.bgmSuggestions || currentProject.bgmSuggestions.length === 0) ? (
+            {(!currentProject?.bgmSuggestions || currentProject?.bgmSuggestions.length === 0) ? (
               <div className="flex-1 glass-panel rounded-2xl border border-gray-800/50 p-6 flex flex-col items-center justify-center text-center gap-4">
                 <div className="p-4 rounded-full bg-slate-950 border border-gray-900 shadow-inner">
                   <Music className="w-10 h-10 text-gray-700" />
@@ -2463,7 +3076,7 @@ export default function CinemaManager() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
-                  {currentProject.bgmSuggestions.map((row, idx) => {
+                  {(currentProject?.bgmSuggestions || []).map((row, idx) => {
                     const isActive = activeBgmSegment?.id === row.id;
                     return (
                       <BgmSegmentCard
@@ -2733,6 +3346,297 @@ export default function CinemaManager() {
         initialPath={voiceDir}
         title="Chọn thư mục âm thanh thuyết minh (MP3)"
       />
+
+      {showHookModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="max-w-6xl w-full h-[90vh] bg-slate-900 border border-slate-850 rounded-2xl p-6 shadow-2xl flex flex-col gap-5 overflow-hidden animate-in fade-in zoom-in duration-200">
+            
+            {/* Header */}
+            <div className="flex justify-between items-center shrink-0 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                  <Scissors className="w-4 h-4 text-violet-400" />
+                  Cấu hình Hook (Xem trước & Chọn Phân Cảnh)
+                </h3>
+                <p className="text-[10px] text-gray-500 mt-0.5 font-sans">
+                  Chọn các phân cảnh xuất hiện trước trong Hook. Kéo thả hoặc bấm nút để thay đổi thứ tự.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setHookIsPlaying(false);
+                  setShowHookModal(false);
+                }}
+                className="bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-slate-200 p-1.5 rounded-lg border border-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Split Content */}
+            <div className="flex-1 flex gap-6 overflow-hidden min-h-0">
+              
+              {/* LEFT HALF: Video & Subtitle Preview */}
+              <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                <div 
+                  style={{ containerType: 'inline-size' }}
+                  className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-950 flex items-center justify-center select-none group shrink-0"
+                >
+                  <div 
+                    className="relative w-full h-full flex items-center justify-center transition-opacity"
+                    style={{ opacity: (totalHookDuration > 0 && hookCurrentTime >= totalHookDuration - 2.0) ? Math.max(0, (totalHookDuration - hookCurrentTime) / 2.0) : 1.0 }}
+                  >
+                    {activeHookSegment ? (
+                      activeHookSegment.videoUrl ? (
+                        <video
+                          key={activeHookSegment.stt}
+                          ref={hookVideoRef}
+                          src={activeHookSegment.videoUrl}
+                          onLoadedMetadata={handleHookMetadataLoaded}
+                          onTimeUpdate={handleHookTimeUpdate}
+                          onEnded={handleHookVideoEnded}
+                          className="w-full h-full object-contain"
+                          muted
+                          playsInline
+                        />
+                      ) : activeHookSegment.imageUrl ? (
+                        <div className="relative w-full h-full overflow-hidden flex items-center justify-center">
+                          <img
+                            src={activeHookSegment.imageUrl}
+                            alt={`Hook scene ${activeHookSegment.stt}`}
+                            className={`w-full h-full object-contain ${hookIsPlaying ? 'animate-ken-burns' : ''}`}
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-center text-gray-500 text-xs">
+                          Phân cảnh #{activeHookSegment.stt} không có ảnh hoặc video
+                        </div>
+                      )
+                    ) : (
+                      <div className="text-center text-gray-500 text-xs flex flex-col items-center gap-2">
+                        <Film className="w-10 h-10 text-gray-700 animate-pulse" />
+                        <span>Chưa chọn phân cảnh nào cho đoạn Hook. Hãy chọn ở bảng bên phải.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Subtitle Overlay */}
+                  <div className="absolute inset-0 pointer-events-none flex flex-col p-4 z-10">
+                    <div className={`w-full flex justify-center ${
+                      verticalAlign === 'top' 
+                        ? 'mt-2' 
+                        : verticalAlign === 'center' 
+                        ? 'my-auto' 
+                        : 'mb-2 mt-auto'
+                    }`}>
+                      {activeHookSubtitle?.text && (
+                        <div
+                          style={subtitleStyle}
+                          className="text-center font-bold tracking-wide max-w-[85%] whitespace-pre-wrap select-none shadow-2xl border border-white/5 backdrop-blur-[2px]"
+                        >
+                          {wrapSubtitleText(activeHookSubtitle.text, maxLineLength)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Indicator info (Top Right) */}
+                  {activeHookSegment && (
+                    <div className="absolute top-3 right-3 bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded border border-slate-800 text-[9px] text-slate-350 font-mono font-bold select-none pointer-events-none">
+                      HOOK SCENE {hookTimelineSegments.indexOf(activeHookSegment) + 1}/{hookTimelineSegments.length} (STT {activeHookSegment.stt})
+                    </div>
+                  )}
+
+                  {/* Hook BGM notification indicator */}
+                  {hookBgmPath && (
+                    <div className="absolute top-3 left-3 bg-violet-950/80 backdrop-blur-md px-2.5 py-1 rounded border border-violet-800/40 text-[9px] text-violet-300 font-bold select-none pointer-events-none flex items-center gap-1.5 shadow">
+                      <Music className="w-3 h-3 text-violet-400" />
+                      Có Hook BGM: hook_bgm
+                    </div>
+                  )}
+                </div>
+
+                {/* Player Controller Bar */}
+                <div className="bg-slate-950/45 p-3 rounded-xl border border-slate-850 flex items-center gap-3 shrink-0 select-none">
+                  <button
+                    onClick={toggleHookPlay}
+                    disabled={hookTimelineSegments.length === 0}
+                    className="p-2 rounded-lg bg-violet-650 hover:bg-violet-550 text-white hover:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
+                  >
+                    {hookIsPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  </button>
+
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500 font-mono w-10 text-right">
+                      {Math.floor(hookCurrentTime / 60)}:
+                      {String(Math.floor(hookCurrentTime % 60)).padStart(2, '0')}.
+                      {String(Math.floor((hookCurrentTime % 1) * 10)).padStart(1, '0')}
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max={totalHookDuration}
+                      step="0.05"
+                      value={hookCurrentTime}
+                      onChange={(e) => setHookCurrentTime(parseFloat(e.target.value))}
+                      disabled={hookTimelineSegments.length === 0}
+                      className="flex-1 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-[10px] text-gray-500 font-mono w-10 text-left">
+                      {Math.floor(totalHookDuration / 60)}:
+                      {String(Math.floor(totalHookDuration % 60)).padStart(2, '0')}.
+                      {String(Math.floor((totalHookDuration % 1) * 10)).padStart(1, '0')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Selected Hook segments list ordering */}
+                <div className="flex-1 flex flex-col gap-2 overflow-hidden border border-slate-850 bg-slate-950/30 rounded-xl p-3">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block border-b border-slate-900 pb-1 shrink-0 select-none">
+                    Thứ tự phân cảnh đã chọn ({hookTimelineSegments.length} cảnh)
+                  </span>
+                  <div className="flex-1 overflow-y-auto flex flex-col gap-1.5 pr-1.5">
+                    {hookTimelineSegments.map((seg, idx) => (
+                      <div key={idx} className="flex items-center justify-between gap-3 bg-slate-900 border border-slate-850/60 p-2.5 rounded-lg group select-none">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-violet-650 text-white font-bold text-[9px] w-5 h-5 rounded-full flex items-center justify-center font-mono">
+                            {idx + 1}
+                          </span>
+                          <span className="text-xs font-bold text-slate-300 font-sans">Phân cảnh #{seg.stt}</span>
+                          <span className="text-[10px] text-gray-500 font-mono">({seg.targetDuration.toFixed(1)}s)</span>
+                          <span className="text-[10px] text-gray-400 line-clamp-1 max-w-[200px] italic font-sans">
+                            {seg.subtitles?.[0]?.text || 'Không có phụ đề'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleMoveHookSegment(idx, 'up')}
+                            disabled={idx === 0}
+                            className="p-1 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            <ArrowUp className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => handleMoveHookSegment(idx, 'down')}
+                            disabled={idx === hookTimelineSegments.length - 1}
+                            className="p-1 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            <ArrowDown className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => handleSelectHookSegment(seg.stt)}
+                            className="p-1 rounded bg-slate-950 hover:bg-red-950 border border-slate-800 hover:border-red-900 text-slate-400 hover:text-red-400 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {hookTimelineSegments.length === 0 && (
+                      <div className="flex-1 flex items-center justify-center text-xs text-gray-600 italic font-sans">
+                        Chưa chọn phân cảnh nào
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* RIGHT HALF: Table of All Scenes */}
+              <div className="w-[45%] flex flex-col gap-3 overflow-hidden border-l border-slate-850 pl-6 select-none">
+                <span className="text-[10px] font-bold text-slate-450 uppercase tracking-wider block shrink-0">
+                  Chọn phân cảnh từ danh sách (Bấm dòng để chọn)
+                </span>
+                
+                <div className="flex-1 overflow-y-auto border border-slate-850 rounded-xl bg-slate-950/20 overflow-x-hidden">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-950 border-b border-slate-850/60 sticky top-0 text-[10px] text-slate-450 uppercase tracking-wider font-bold">
+                        <th className="py-2.5 px-3 w-16 text-center">Chọn</th>
+                        <th className="py-2.5 px-2 w-14">STT</th>
+                        <th className="py-2.5 px-3">Phụ đề & Thời lượng</th>
+                        <th className="py-2.5 px-3 w-20 text-center">Asset</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(currentProject?.sceneMapping || []).map((scene) => {
+                        const isSelected = (currentProject?.hookSegments || []).includes(scene.stt);
+                        const orderIdx = (currentProject?.hookSegments || []).indexOf(scene.stt);
+                        const promptRow = (currentProject?.imagePrompts || []).find(p => p.stt === scene.stt);
+                        const hasVideo = !!promptRow?.videoUrl;
+                        const hasImage = !!promptRow?.imageUrl;
+                        const [startStr, endStr] = (scene.timeRange || '').split('-->').map(x => x.trim());
+                        const dur = Math.max(0.5, parseTimestampToSeconds(endStr) - parseTimestampToSeconds(startStr));
+
+                        return (
+                          <tr
+                            key={scene.stt}
+                            onClick={() => handleSelectHookSegment(scene.stt)}
+                            className={`border-b border-slate-900/60 hover:bg-slate-850/30 transition cursor-pointer select-none ${
+                              isSelected ? 'bg-violet-950/25 hover:bg-violet-950/30' : ''
+                            }`}
+                          >
+                            <td className="py-3 px-3 text-center">
+                              {isSelected ? (
+                                <span className="inline-flex bg-violet-650 text-white font-bold text-[9px] w-5 h-5 rounded-full items-center justify-center font-mono animate-in zoom-in duration-150">
+                                  {orderIdx + 1}
+                                </span>
+                              ) : (
+                                <span className="inline-block border border-slate-700 w-4 h-4 rounded hover:border-violet-500" />
+                              )}
+                            </td>
+                            <td className="py-3 px-2 font-bold text-slate-400">#{scene.stt}</td>
+                            <td className="py-3 px-3 space-y-0.5">
+                              <div className="text-[10px] text-gray-500 font-mono">
+                                Thời lượng: {dur.toFixed(1)}s
+                              </div>
+                              <div className="line-clamp-2 text-slate-350 leading-normal max-w-[280px] font-sans">
+                                {scene.sceneDescription || 'Không có mô tả phụ đề'}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              {hasVideo ? (
+                                <span className="bg-emerald-950/50 border border-emerald-900 text-emerald-400 px-2 py-0.5 rounded text-[9px] font-bold">
+                                  VIDEO
+                                </span>
+                              ) : hasImage ? (
+                                <span className="bg-blue-950/50 border border-blue-900 text-blue-400 px-2 py-0.5 rounded text-[9px] font-bold">
+                                  ẢNH
+                                </span>
+                              ) : (
+                                <span className="bg-slate-900 border border-slate-800 text-slate-500 px-2 py-0.5 rounded text-[9px]">
+                                  TRỐNG
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Bottom Actions */}
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setHookIsPlaying(false);
+                  setShowHookModal(false);
+                }}
+                className="px-6 py-2.5 bg-violet-650 hover:bg-violet-550 text-white text-xs font-bold rounded-xl active:scale-95 transition cursor-pointer font-sans"
+              >
+                Xác nhận lưu Hook
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -366,9 +366,8 @@ def main():
     voice_dir = payload.get('voiceDir', '')
     srt_content = payload.get('srtContent', '')
     burn_subtitles = payload.get('burnSubtitles', False)
-    
+    hook_segments = payload.get('hookSegments', [])
 
-    
     if not scenes:
         print("Error: No scenes list supplied in payload.", file=sys.stderr)
         sys.exit(1)
@@ -383,24 +382,94 @@ def main():
     # Resolve ffmpeg early to compute audio durations
     ffmpeg_path = resolve_ffmpeg_path()
 
-    # 1. Collect all subtitles chronologically across all scenes and set original start/end times
+    # 1. Restructure scenes (Hook + Shifted Main Video) and collect shifted subtitles
+    compiled_scenes = []
     all_subtitles = []
-    seen_sub_ids = set()
+    
+    D_hook = 0.0
+    
+    # A. Process Hook segments (if any)
+    if hook_segments:
+        for hook_idx, stt in enumerate(hook_segments):
+            # Find the original scene
+            orig_scene = next((s for s in scenes if s.get('stt') == stt), None)
+            if orig_scene:
+                h_dur = float(orig_scene.get('targetDuration', 5.0))
+                h_scene = {
+                    'stt': orig_scene.get('stt'),
+                    'sceneStart': D_hook,
+                    'targetDuration': h_dur,
+                    'videoUrl': orig_scene.get('videoUrl'),
+                    'imageUrl': orig_scene.get('imageUrl'),
+                    'is_hook': True,
+                    'hook_scene_idx': hook_idx,
+                    'subtitles': []
+                }
+                
+                # Duplicate and shift subtitles for Hook
+                orig_scene_start = float(orig_scene.get('sceneStart', 0.0))
+                for sub in orig_scene.get('subtitles', []):
+                    s_start = parse_timestamp(sub.get('startTime', ''))
+                    s_end = parse_timestamp(sub.get('endTime', ''))
+                    rel_start = s_start - orig_scene_start
+                    rel_end = s_end - orig_scene_start
+                    
+                    try:
+                        sub_id_val = int(sub.get('id', 0))
+                    except:
+                        sub_id_val = 0
+                        
+                    h_sub = {
+                        'id': sub_id_val * 1000 + hook_idx,
+                        'text': sub.get('text'),
+                        'startTime': sub.get('startTime'),
+                        'endTime': sub.get('endTime'),
+                        'shiftedStart': D_hook + rel_start,
+                        'shiftedEnd': D_hook + rel_end,
+                        'is_hook': True,
+                        'hook_scene_idx': hook_idx
+                    }
+                    h_scene['subtitles'].append(h_sub)
+                    all_subtitles.append(h_sub)
+                
+                compiled_scenes.append(h_scene)
+                D_hook += h_dur
+
+    # B. Add Main Scenes (shifted by D_hook)
     for scene in scenes:
-        scene_subs = scene.get('subtitles', [])
-        scene_subs.sort(key=lambda s: parse_timestamp(s.get('startTime', '')))
+        m_dur = float(scene.get('targetDuration', 5.0))
+        orig_scene_start = float(scene.get('sceneStart', 0.0))
         
-        # Calculate original timestamps for each subtitle block
-        for sub in scene_subs:
-            sub_id = sub.get('id')
+        m_scene = {
+            'stt': scene.get('stt'),
+            'sceneStart': D_hook + orig_scene_start,
+            'targetDuration': m_dur,
+            'videoUrl': scene.get('videoUrl'),
+            'imageUrl': scene.get('imageUrl'),
+            'is_hook': False,
+            'subtitles': []
+        }
+        
+        for sub in scene.get('subtitles', []):
             s_start = parse_timestamp(sub.get('startTime', ''))
             s_end = parse_timestamp(sub.get('endTime', ''))
-            sub['shiftedStart'] = s_start
-            sub['shiftedEnd'] = s_end
             
-            if sub_id and sub_id not in seen_sub_ids:
-                all_subtitles.append(sub)
-                seen_sub_ids.add(sub_id)
+            m_sub = {
+                'id': sub.get('id'),
+                'text': sub.get('text'),
+                'startTime': sub.get('startTime'),
+                'endTime': sub.get('endTime'),
+                'shiftedStart': D_hook + s_start,
+                'shiftedEnd': D_hook + s_end,
+                'is_hook': False
+            }
+            m_scene['subtitles'].append(m_sub)
+            all_subtitles.append(m_sub)
+            
+        compiled_scenes.append(m_scene)
+
+    # Use compiled_scenes as the official scenes list
+    scenes = compiled_scenes
 
     # Sort chronologically by start time
     all_subtitles.sort(key=lambda s: s.get('shiftedStart', 0.0))
@@ -424,6 +493,8 @@ def main():
         # 3. Map MP3 files to unique original subtitle IDs
         unique_orig_ids = []
         for sub in all_subtitles:
+            if sub.get('is_hook', False):
+                continue
             sub_id = int(sub.get('id', 0))
             orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
             if orig_id not in unique_orig_ids:
@@ -447,20 +518,28 @@ def main():
                     'duration': dur
                 }
 
-    # Build final voice_files with shifted start times (insert each original voice only once)
-    seen_orig_ids = set()
+    # Build final voice_files with shifted start times (insert each original voice only once per scene trigger context)
+    seen_triggers = set()
     for sub in all_subtitles:
         sub_id = int(sub.get('id', 0))
         orig_id = sub_id // 1000 if sub_id >= 1000 else sub_id
-        if orig_id in seen_orig_ids:
-            continue # Skip subsequent split blocks of the same original subtitle
+        
+        # Check if it is a hook subtitle
+        is_hook = sub.get('is_hook', False)
+        if is_hook:
+            trigger_key = f"hook_{sub.get('hook_scene_idx')}_{orig_id}"
+        else:
+            trigger_key = f"main_{orig_id}"
+            
+        if trigger_key in seen_triggers:
+            continue
             
         if sub_id in sub_to_voice:
             voice_file = sub_to_voice[sub_id]['path']
             shifted_start = sub.get('shiftedStart', 0.0)
             delay_ms = int(shifted_start * 1000)
             voice_files.append((voice_file, delay_ms))
-            seen_orig_ids.add(orig_id)
+            seen_triggers.add(trigger_key)
                         
     print(f"Starting compile job. Type: {video_type}, Voice Dir: {voice_dir}, Voices found: {len(voice_files)}", flush=True)
     
@@ -607,19 +686,105 @@ def main():
                         
                     resized_img = pil_img.resize((width, height), Image.Resampling.LANCZOS)
                     
+                    # Convert to OpenCV format (BGR) ONCE before loop for high performance
+                    src_cv = cv2.cvtColor(np.array(resized_img), cv2.COLOR_RGB2BGR)
+                    
+                    # 10 diverse Ken Burns motion effects
+                    effects_list = [
+                        'zoom_in_center',
+                        'pan_left',
+                        'zoom_out_center',
+                        'pan_right',
+                        'zoom_in_top_left',
+                        'pan_up',
+                        'zoom_in_bottom_right',
+                        'pan_down',
+                        'zoom_in_top_right',
+                        'zoom_in_bottom_left'
+                    ]
+                    effect = effects_list[index % len(effects_list)]
+                    
+                    # Offsets for motion (safe values to prevent out of bounds)
+                    w_float = float(width)
+                    h_float = float(height)
+                    w2 = w_float / 2.0
+                    h2 = h_float / 2.0
+                    dx = w_float * 0.025
+                    dy = h_float * 0.025
+                    dx_corner = w_float * 0.04
+                    dy_corner = h_float * 0.04
+                    
                     # Generate Ken Burns frames
                     for f_idx in range(target_frames):
-                        scale = 1.0 + 0.05 * (f_idx / max(1, target_frames))
-                        cw = int(width / scale)
-                        ch = int(height / scale)
-                        cx1 = (width - cw) // 2
-                        cy1 = (height - ch) // 2
+                        total_f = max(2, target_frames)
+                        t_raw = f_idx / (total_f - 1)
                         
-                        cropped = resized_img.crop((cx1, cy1, cx1 + cw, cy1 + ch))
-                        final_frame = cropped.resize((width, height), Image.Resampling.LANCZOS)
+                        # Quadratic ease-in-out
+                        if t_raw < 0.5:
+                            t = 2.0 * t_raw * t_raw
+                        else:
+                            t = 1.0 - ((-2.0 * t_raw + 2.0) ** 2) / 2.0
+                            
+                        # Default configuration
+                        s_start, s_end = 1.02, 1.10
+                        c_x_start, c_x_end = w2, w2
+                        c_y_start, c_y_end = h2, h2
                         
-                        # Convert to OpenCV frame format (BGR)
-                        cv_frame = cv2.cvtColor(np.array(final_frame), cv2.COLOR_RGB2BGR)
+                        if effect == 'zoom_in_center':
+                            s_start, s_end = 1.02, 1.10
+                        elif effect == 'zoom_out_center':
+                            s_start, s_end = 1.10, 1.02
+                        elif effect == 'pan_left':
+                            s_start, s_end = 1.06, 1.10
+                            c_x_start, c_x_end = w2 + dx, w2 - dx
+                        elif effect == 'pan_right':
+                            s_start, s_end = 1.06, 1.10
+                            c_x_start, c_x_end = w2 - dx, w2 + dx
+                        elif effect == 'pan_up':
+                            s_start, s_end = 1.06, 1.10
+                            c_y_start, c_y_end = h2 + dy, h2 - dy
+                        elif effect == 'pan_down':
+                            s_start, s_end = 1.06, 1.10
+                            c_y_start, c_y_end = h2 - dy, h2 + dy
+                        elif effect == 'zoom_in_top_left':
+                            s_start, s_end = 1.02, 1.12
+                            c_x_end, c_y_end = w2 - dx_corner, h2 - dy_corner
+                        elif effect == 'zoom_in_bottom_right':
+                            s_start, s_end = 1.02, 1.12
+                            c_x_end, c_y_end = w2 + dx_corner, h2 + dy_corner
+                        elif effect == 'zoom_in_top_right':
+                            s_start, s_end = 1.02, 1.12
+                            c_x_end, c_y_end = w2 + dx_corner, h2 - dy_corner
+                        elif effect == 'zoom_in_bottom_left':
+                            s_start, s_end = 1.02, 1.12
+                            c_x_end, c_y_end = w2 - dx_corner, h2 + dy_corner
+                            
+                        # Linear interpolation for scale and center positions
+                        scale = s_start + (s_end - s_start) * t
+                        cx = c_x_start + (c_x_end - c_x_start) * t
+                        cy = c_y_start + (c_y_end - c_y_start) * t
+                        
+                        # Calculate floating-point crop window
+                        cw = w_float / scale
+                        ch = h_float / scale
+                        
+                        # Clamp crop center to guarantee bounds sanity
+                        cx = max(cw / 2.0, min(w_float - cw / 2.0, cx))
+                        cy = max(ch / 2.0, min(h_float - ch / 2.0, cy))
+                        
+                        x1 = cx - cw / 2.0
+                        y1 = cy - ch / 2.0
+                        
+                        # Affine Matrix calculation for subpixel precision warping
+                        sx = w_float / cw
+                        sy = h_float / ch
+                        M = np.float32([
+                            [sx, 0.0, -x1 * sx],
+                            [0.0, sy, -y1 * sy]
+                        ])
+                        
+                        # Warp frame with high-quality Lanczos interpolation
+                        cv_frame = cv2.warpAffine(src_cv, M, (width, height), flags=cv2.INTER_LANCZOS4)
                         frames_list.append(cv_frame)
                 except Exception as e:
                     print(f"Error loading fallback image: {e}", file=sys.stderr)
@@ -633,6 +798,16 @@ def main():
         # 3. Burn Subtitles and Write Frames to Writer
         for f_idx, cv_frame in enumerate(frames_list):
             v_time = total_frames_written / fps
+            
+            # Check if this frame is within the last 2 seconds of the hook
+            hook_frames_limit = int(D_hook * fps)
+            if total_frames_written < hook_frames_limit:
+                fade_frames = 2.0 * fps
+                if total_frames_written >= hook_frames_limit - fade_frames:
+                    f = (hook_frames_limit - total_frames_written) / fade_frames
+                    f = max(0.0, min(1.0, f))
+                    cv_frame = (cv_frame * f).astype(np.uint8)
+                    
             total_frames_written += 1
             
             # Find active subtitle from the global list using the exact frame video time
@@ -673,6 +848,38 @@ def main():
         path_val = seg.get('audioPath')
         if path_val and os.path.exists(path_val):
             valid_bgm_segments.append(seg)
+
+    # Automatically scan for hook BGM file in bgm directory
+    hook_bgm_path = None
+    bgm_dir = os.path.join(project_dir, 'bgm')
+    if os.path.exists(bgm_dir):
+        audio_exts = ('.mp3', '.wav', '.m4a', '.ogg', '.aac', '.flac')
+        for filename in os.listdir(bgm_dir):
+            name_without_ext = os.path.splitext(filename)[0].lower()
+            ext = os.path.splitext(filename)[1].lower()
+            if name_without_ext == 'hook_bgm' and ext in audio_exts:
+                hook_bgm_path = os.path.join(bgm_dir, filename)
+                print(f"Found hook BGM file at: {hook_bgm_path}", flush=True)
+                break
+                
+    # Shift main BGM segments by D_hook
+    for seg in valid_bgm_segments:
+        seg['start'] = float(seg.get('start', 0.0)) + D_hook
+        seg['end'] = float(seg.get('end', 0.0)) + D_hook
+        
+    # Prepend hook BGM segment if found and hook duration is > 0
+    if hook_bgm_path and os.path.exists(hook_bgm_path) and D_hook > 0:
+        fade_st = max(0.0, D_hook - 2.0)
+        fade_d = min(2.0, D_hook)
+        hook_bgm_segment = {
+            'audioPath': hook_bgm_path,
+            'start': 0.0,
+            'end': D_hook,
+            'is_hook_bgm': True,
+            'fade_start': fade_st,
+            'fade_duration': fade_d
+        }
+        valid_bgm_segments.insert(0, hook_bgm_segment)
 
     if voice_files or valid_bgm_segments:
         print(f"Merging audio tracks. Voice files: {len(voice_files)}, BGM segments: {len(valid_bgm_segments)} (Volume: {bgm_volume_db}dB)", flush=True)
@@ -724,7 +931,12 @@ def main():
                 end = float(seg.get('end', 0.0))
                 dur = max(0.1, end - start)
                 start_ms = int(start * 1000)
-                filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}|{start_ms}[b{idx}];")
+                if seg.get('is_hook_bgm'):
+                    fade_st = float(seg.get('fade_start', 0.0))
+                    fade_d = float(seg.get('fade_duration', 2.0))
+                    filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,afade=t=out:st={fade_st:.3f}:d={fade_d:.3f},adelay={start_ms}|{start_ms}[b{idx}];")
+                else:
+                    filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}|{start_ms}[b{idx}];")
                 
             # Compile mix commands
             if v_count > 0 and b_count > 0:
@@ -877,7 +1089,12 @@ def main():
                     end = float(seg.get('end', 0.0))
                     dur = max(0.1, end - start)
                     start_ms = int(start * 1000)
-                    filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}|{start_ms}[b{idx}];")
+                    if seg.get('is_hook_bgm'):
+                        fade_st = float(seg.get('fade_start', 0.0))
+                        fade_d = float(seg.get('fade_duration', 2.0))
+                        filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,afade=t=out:st={fade_st:.3f}:d={fade_d:.3f},adelay={start_ms}|{start_ms}[b{idx}];")
+                    else:
+                        filter_parts.append(f"[{input_idx}:a]aresample=44100,aformat=channel_layouts=stereo,atrim=0:{dur:.3f},asetpts=PTS-STARTPTS,volume={bgm_volume_db}dB,adelay={start_ms}|{start_ms}[b{idx}];")
                     
                 # Mix BGMs
                 if b_count > 0:

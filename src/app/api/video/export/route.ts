@@ -27,9 +27,10 @@ function parseTimestampToSeconds(ts: string): number {
 }
 
 // Subtitle range parser (e.g. "12-18" or "12")
-function getSubtitlesForScene(subtitleRange: string, blocks: any[]): any[] {
+function getSubtitlesForScene(subtitleRange: any, blocks: any[]): any[] {
   if (!subtitleRange) return [];
-  const parts = subtitleRange.split('-').map(x => parseInt(x.trim(), 10));
+  const rangeStr = String(subtitleRange);
+  const parts = rangeStr.split('-').map(x => parseInt(x.trim(), 10));
   if (parts.length === 1 && !isNaN(parts[0])) {
     const id = parts[0];
     return blocks.filter(b => {
@@ -185,7 +186,8 @@ export async function POST(req: Request) {
       bgmVolumeDb = -18,
       bgmSuggestions = [],
       burnSubtitles = false,
-      validateOnly = false
+      validateOnly = false,
+      hookSegments = []
     } = body;
 
     console.log('[Export Video API] Request payload parsed successfully:', {
@@ -384,7 +386,8 @@ export async function POST(req: Request) {
         segments: bgmSegments
       },
       srtContent,
-      burnSubtitles
+      burnSubtitles,
+      hookSegments
     };
 
     const tempPayloadPath = path.join(process.cwd(), `src/lib/temp_payload_${projectId || 'export'}.json`);

@@ -86,6 +86,10 @@ function createWindow() {
 
   mainWindow.setMenu(null);
   
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Browser Console]: ${message} (from ${sourceId}:${line})`);
+  });
+  
   // Load local static loading splash screen instantly
   mainWindow.loadFile(path.join(__dirname, 'loading.html'));
 

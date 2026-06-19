@@ -63,7 +63,7 @@ export default function SceneMappingGrid({ onNextTab }: { onNextTab: () => void 
   };
 
   const handleAddRow = () => {
-    let index = currentProject.sceneMapping.length;
+    let index = (currentProject?.sceneMapping || []).length;
     if (gridApi) {
       const selected = gridApi.getSelectedNodes();
       if (selected.length > 0) {
@@ -245,7 +245,7 @@ export default function SceneMappingGrid({ onNextTab }: { onNextTab: () => void 
         ) : (
           <button
             onClick={handleGenerateImagePrompts}
-            disabled={currentProject.sceneMapping.length === 0}
+            disabled={(currentProject?.sceneMapping || []).length === 0}
             className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-gray-850 disabled:to-gray-900 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded shadow-lg shadow-violet-500/10 hover:shadow-violet-500/20 active:scale-98 transition cursor-pointer"
           >
             <Sparkles className="w-4 h-4" />
@@ -267,7 +267,7 @@ export default function SceneMappingGrid({ onNextTab }: { onNextTab: () => void 
       <div className="ag-theme-quartz-dark w-full h-[550px]">
         <AgGridReact
           theme="legacy"
-          rowData={currentProject.sceneMapping}
+          rowData={currentProject?.sceneMapping || []}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
           rowSelection={{
@@ -285,7 +285,7 @@ export default function SceneMappingGrid({ onNextTab }: { onNextTab: () => void 
 
       <div className="text-[10px] text-gray-500 italic flex items-center justify-between">
         <span>* Double click any cell to edit details. All changes are auto-saved.</span>
-        <span>Total Scenes: {currentProject.sceneMapping.length}</span>
+        <span>Total Scenes: {(currentProject?.sceneMapping || []).length}</span>
       </div>
 
       {/* Collapsible API Logs & Queue Monitor */}

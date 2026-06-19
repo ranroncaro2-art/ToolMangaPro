@@ -185,12 +185,12 @@ export default function Home() {
   }, [currentProject?.id, currentProject?.name, isRefreshing, saveCurrentProject, exportProject]);
 
 
-  const isUploadCompleted = !!currentProject.srtContent;
-  const isMappingCompleted = currentProject.sceneMapping.length > 0;
-  const isPromptsCompleted = currentProject.imagePrompts.length > 0;
-  const isShotsCompleted = (currentProject.imagePrompts || []).some(p => p.imageUrl);
-  const isReferencesCompleted = (currentProject.characters?.length || 0) > 0 || (currentProject.exteriors?.length || 0) > 0;
-  const isVideoCompleted = (currentProject.imagePrompts || []).some(p => p.videoUrl);
+  const isUploadCompleted = !!currentProject?.srtContent;
+  const isMappingCompleted = (currentProject?.sceneMapping || []).length > 0;
+  const isPromptsCompleted = (currentProject?.imagePrompts || []).length > 0;
+  const isShotsCompleted = (currentProject?.imagePrompts || []).some(p => p.imageUrl);
+  const isReferencesCompleted = (currentProject?.characters?.length || 0) > 0 || (currentProject?.exteriors?.length || 0) > 0;
+  const isVideoCompleted = (currentProject?.imagePrompts || []).some(p => p.videoUrl);
 
   // Auth gate checks
   if (checkingAuth) {

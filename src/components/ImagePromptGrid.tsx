@@ -263,13 +263,13 @@ export default function ImagePromptGrid() {
               <>
                 <button
                   onClick={() => generateImagePrompts(false)}
-                  disabled={currentProject.sceneMapping.length === 0}
+                  disabled={(currentProject?.sceneMapping || []).length === 0}
                   className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 border border-gray-800 hover:border-gray-700 text-xs px-3.5 py-2 rounded text-slate-300 hover:text-slate-200 transition cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-violet-400" />
                   Regenerate Prompts
                 </button>
-                {currentProject.imagePrompts && currentProject.imagePrompts.length > 0 && currentProject.imagePrompts.length < currentProject.sceneMapping.length && (
+                {currentProject?.imagePrompts && currentProject.imagePrompts.length > 0 && currentProject.imagePrompts.length < (currentProject?.sceneMapping || []).length && (
                   <button
                     onClick={() => generateImagePrompts(true)}
                     className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-900 border border-gray-800 hover:border-gray-700 text-xs px-3.5 py-2 rounded text-violet-400 hover:text-violet-300 transition cursor-pointer"

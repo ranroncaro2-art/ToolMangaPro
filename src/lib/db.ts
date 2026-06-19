@@ -20,6 +20,7 @@ export interface Project {
   bgmSuggestions?: BgmSuggestionRow[];
   bgmVolumeDb?: number;
   scriptContent?: string;
+  hookSegments?: number[];
 }
 
 export interface BgmSuggestionRow {
