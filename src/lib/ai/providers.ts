@@ -188,7 +188,8 @@ async function callProxy(
   projectId?: string,
   type?: string,
   label?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  responseSchema?: any
 ): Promise<{ text: string; usage: { inputTokens: number; outputTokens: number; cost: number } }> {
   const maxRetries = 3;
   let delay = 2000;
@@ -209,7 +210,8 @@ async function callProxy(
           responseFormat,
           projectId,
           type,
-          label
+          label,
+          responseSchema
         }),
         signal
       });
@@ -444,6 +446,93 @@ ${JSON.stringify(scenes, null, 2)}`;
   }
 }
 
+const SCENE_MAPPING_SCHEMA = {
+  type: 'object',
+  properties: {
+    scenes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          stt: { type: 'integer' },
+          subtitleRange: { type: 'string' },
+          timeRange: { type: 'string' },
+          characters: { type: 'string' },
+          props: { type: 'string' },
+          mainSituation: { type: 'string' },
+          mainEmotion: { type: 'string' },
+          sceneDescription: { type: 'string' }
+        },
+        required: [
+          'stt',
+          'subtitleRange',
+          'timeRange',
+          'characters',
+          'props',
+          'mainSituation',
+          'mainEmotion',
+          'sceneDescription'
+        ]
+      }
+    },
+    newCharacters: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          characterId: { type: 'string' },
+          age: { type: 'string' },
+          gender: { type: 'string' },
+          personality: { type: 'string' },
+          role: { type: 'string' },
+          prompt: { type: 'string' }
+        },
+        required: ['characterId', 'age', 'gender', 'personality', 'role', 'prompt']
+      }
+    },
+    newExteriors: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          exteriorId: { type: 'string' },
+          prompt: { type: 'string' }
+        },
+        required: ['exteriorId', 'prompt']
+      }
+    },
+    newProps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          propId: { type: 'string' },
+          prompt: { type: 'string' }
+        },
+        required: ['propId', 'prompt']
+      }
+    },
+    plotSummary: { type: 'string' }
+  },
+  required: ['scenes', 'newCharacters', 'newExteriors', 'newProps', 'plotSummary']
+};
+
+const IMAGE_PROMPTS_SCHEMA = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      stt: { type: 'integer' },
+      characters: { type: 'string' },
+      props: { type: 'string' },
+      description: { type: 'string' },
+      exterior: { type: 'string' },
+      motion: { type: 'string' }
+    },
+    required: ['stt', 'characters', 'props', 'description', 'exterior', 'motion']
+  }
+};
+
 export class GeminiProvider implements AIProvider {
   async generateSceneMappingIncremental(
     srtChunkContent: string,
@@ -460,13 +549,28 @@ export class GeminiProvider implements AIProvider {
     newProps: any[];
     plotSummary: string;
   }>> {
+    // Optimize reference payload by removing drawing prompts in scene mapping phase
+    const cleanCharacters = (knownCharacters || []).map((c: any) => ({
+      characterId: c.characterId,
+      age: c.age || '',
+      gender: c.gender || '',
+      role: c.role || '',
+      personality: c.personality || ''
+    }));
+    const cleanExteriors = (knownExteriors || []).map((e: any) => ({
+      exteriorId: e.exteriorId
+    }));
+    const cleanProps = (knownProps || []).map((p: any) => ({
+      propId: p.propId
+    }));
+
     const prompt = `${promptTemplate}
 
 [DỮ LIỆU CỐT TRUYỆN ĐÃ ĐƯỢC PHÁT HIỆN TRƯỚC ĐÓ]:
 - Tóm tắt cốt truyện trước đó: ${plotSummary || 'Chưa có'}
-- Nhân vật đã biết: ${JSON.stringify(knownCharacters)}
-- Bối cảnh đã biết: ${JSON.stringify(knownExteriors)}
-- Đạo cụ đã biết: ${JSON.stringify(knownProps)}
+- Nhân vật đã biết: ${JSON.stringify(cleanCharacters)}
+- Bối cảnh đã biết: ${JSON.stringify(cleanExteriors)}
+- Đạo cụ đã biết: ${JSON.stringify(cleanProps)}
 
 [YÊU CẦU ĐOẠN PHỤ ĐỀ CẦN CHIA CẢNH LẦN NÀY]:
 ${srtChunkContent}`;
@@ -481,7 +585,8 @@ ${srtChunkContent}`;
       config.projectId,
       config.type,
       config.label,
-      config.signal
+      config.signal,
+      SCENE_MAPPING_SCHEMA
     );
 
     const parsed = cleanAndParseJson<any>(response.text);
@@ -525,7 +630,8 @@ ${JSON.stringify(scenes, null, 2)}`;
       config.projectId,
       config.type,
       config.label,
-      config.signal
+      config.signal,
+      IMAGE_PROMPTS_SCHEMA
     );
 
     const parsed = cleanAndParseJson<any>(response.text);

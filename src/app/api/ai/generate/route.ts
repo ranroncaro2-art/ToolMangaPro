@@ -69,14 +69,14 @@ function calculateCost(
     }
   } else if (provider === 'gemini') {
     if (modelLower.includes('flash')) {
-      inputRate = 0.075;
-      outputRate = 0.30;
+      inputRate = 0.30;
+      outputRate = 2.50;
     } else if (modelLower.includes('pro')) {
       inputRate = 1.25;
       outputRate = 5.00;
     } else {
-      inputRate = 0.075;
-      outputRate = 0.30;
+      inputRate = 0.30;
+      outputRate = 2.50;
     }
   } else if (provider === 'claude') {
     if (modelLower.includes('sonnet')) {
@@ -194,7 +194,7 @@ function sanitizeContentForGemini(text: string): string {
 }
 
 async function generateTextContent(payload: any) {
-  const { provider, apiKey, modelName, prompt, systemPrompt, responseFormat } = payload;
+  const { provider, apiKey, modelName, prompt, systemPrompt, responseFormat, responseSchema } = payload;
 
   if (!apiKey) {
     throw new Error('API Key is required');
@@ -285,6 +285,10 @@ async function generateTextContent(payload: any) {
       payloadData.systemInstruction = {
         parts: [{ text: sanitizedSystemPrompt }]
       };
+    }
+
+    if (responseFormat === 'json' && responseSchema) {
+      payloadData.generationConfig.responseSchema = responseSchema;
     }
 
     const geminiRes = await fetch(geminiUrl, {
