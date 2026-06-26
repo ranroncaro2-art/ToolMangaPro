@@ -571,6 +571,8 @@ interface ProjectState {
   setSrtContent: (content: string, name?: string) => void;
   updateSceneMappingCell: (rowIndex: number, colId: string, value: any) => void;
   updateImagePromptCell: (rowIndex: number, colId: string, value: any) => void;
+  updateSegmentCharacterOverride: (stt: number, characterId: string, image: string, mediaId?: string, accountId?: string) => Promise<void>;
+  updateSegmentExteriorOverride: (stt: number, image: string, mediaId?: string, accountId?: string) => Promise<void>;
   
   // Row edits
   addSceneRow: (index?: number) => void;
@@ -1946,7 +1948,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Validate characters references
       const missingCharImages = charNames.filter((name) => {
         const char = findBestCharacterMatch(active.characters || [], name);
-        return !char || !char.image;
+        const charId = char?.characterId || name;
+        const override = row.characterOverrides?.[charId];
+        return !(override?.image || char?.image);
       });
 
       if (missingCharImages.length > 0) {
@@ -1954,7 +1958,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
 
       const matchedChars = charNames
-        .map((name) => findBestCharacterMatch(active.characters || [], name))
+        .map((name) => {
+          const char = findBestCharacterMatch(active.characters || [], name);
+          const charId = char?.characterId || name;
+          const override = row.characterOverrides?.[charId];
+          if (override) {
+            return {
+              characterId: charId,
+              image: override.image,
+              mediaId: override.mediaId,
+              accountId: override.accountId
+            };
+          }
+          return char;
+        })
         .filter((c): c is CharacterReference => !!c);
 
       const propNames = parseCharactersField(row.props || '');
@@ -1978,14 +1995,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Validate exterior background reference
       if (extName) {
         const ext = findBestExteriorMatch(active.exteriors || [], extName);
-        if (!ext || !ext.image) {
+        const extId = ext?.exteriorId || extName;
+        const override = row.exteriorOverride;
+        if (!(override?.image || ext?.image)) {
           throw new Error(`Chưa có ảnh tham chiếu cho bối cảnh: "${extName}". Vui lòng tạo ảnh tham chiếu ở tab "Asset References" trước.`);
         }
       }
 
-      const matchedExt = extName
-        ? findBestExteriorMatch(active.exteriors || [], extName)
-        : undefined;
+      const matchedExt = (() => {
+        if (!extName) return undefined;
+        const ext = findBestExteriorMatch(active.exteriors || [], extName);
+        const extId = ext?.exteriorId || extName;
+        const override = row.exteriorOverride;
+        if (override) {
+          return {
+            exteriorId: extId,
+            image: override.image,
+            mediaId: override.mediaId,
+            accountId: override.accountId
+          };
+        }
+        return ext;
+      })();
 
       const mediaIds: string[] = [];
       let accountId = '';
@@ -2367,6 +2398,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // Auto save if project is loaded
     if (get().currentProject.id) {
       get().saveCurrentProject();
+    }
+  },
+  updateSegmentCharacterOverride: async (stt, characterId, image, mediaId, accountId) => {
+    set((state) => {
+      const updatedPrompts = (state.currentProject.imagePrompts || []).map((row) => {
+        if (row.stt === stt) {
+          const characterOverrides = { ...(row.characterOverrides || {}) };
+          characterOverrides[characterId] = { image, mediaId, accountId };
+          return { ...row, characterOverrides };
+        }
+        return row;
+      });
+      return {
+        currentProject: { ...state.currentProject, imagePrompts: updatedPrompts }
+      };
+    });
+    if (get().currentProject.id) {
+      await get().saveCurrentProject();
+    }
+  },
+  updateSegmentExteriorOverride: async (stt, image, mediaId, accountId) => {
+    set((state) => {
+      const updatedPrompts = (state.currentProject.imagePrompts || []).map((row) => {
+        if (row.stt === stt) {
+          return { 
+            ...row, 
+            exteriorOverride: { image, mediaId, accountId } 
+          };
+        }
+        return row;
+      });
+      return {
+        currentProject: { ...state.currentProject, imagePrompts: updatedPrompts }
+      };
+    });
+    if (get().currentProject.id) {
+      await get().saveCurrentProject();
     }
   },
 
@@ -4875,16 +4943,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       const charNames = parseCharactersField(row.characters);
 
+      // Validate characters references
       const missingCharImages = charNames.filter((name) => {
         const char = findBestCharacterMatch(projData.characters || [], name);
-        return !char || !char.image;
+        const charId = char?.characterId || name;
+        const override = row.characterOverrides?.[charId];
+        return !(override?.image || char?.image);
       });
       if (missingCharImages.length > 0) {
         throw new Error(`Chưa có ảnh tham chiếu cho nhân vật: ${missingCharImages.join(', ')}`);
       }
 
       const matchedChars = charNames
-        .map((name) => findBestCharacterMatch(projData.characters || [], name))
+        .map((name) => {
+          const char = findBestCharacterMatch(projData.characters || [], name);
+          const charId = char?.characterId || name;
+          const override = row.characterOverrides?.[charId];
+          if (override) {
+            return {
+              characterId: charId,
+              image: override.image,
+              mediaId: override.mediaId,
+              accountId: override.accountId
+            };
+          }
+          return char;
+        })
         .filter((c): c is CharacterReference => !!c);
 
       const propNames = parseCharactersField(row.props || '');
@@ -4901,13 +4985,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         .filter((p): p is PropReference => !!p);
 
       const extName = (row.exterior || '').trim();
-      const matchedExt = extName
-        ? findBestExteriorMatch(projData.exteriors || [], extName)
-        : undefined;
-
-      if (extName && (!matchedExt || !matchedExt.image)) {
-        throw new Error(`Chưa có ảnh tham chiếu cho bối cảnh: "${extName}"`);
+      
+      // Validate exterior background reference
+      if (extName) {
+        const ext = findBestExteriorMatch(projData.exteriors || [], extName);
+        const extId = ext?.exteriorId || extName;
+        const override = row.exteriorOverride;
+        if (!(override?.image || ext?.image)) {
+          throw new Error(`Chưa có ảnh tham chiếu cho bối cảnh: "${extName}"`);
+        }
       }
+
+      const matchedExt = (() => {
+        if (!extName) return undefined;
+        const ext = findBestExteriorMatch(projData.exteriors || [], extName);
+        const extId = ext?.exteriorId || extName;
+        const override = row.exteriorOverride;
+        if (override) {
+          return {
+            exteriorId: extId,
+            image: override.image,
+            mediaId: override.mediaId,
+            accountId: override.accountId
+          };
+        }
+        return ext;
+      })();
 
       const mediaIds: string[] = [];
       let accountId = '';

@@ -16,7 +16,10 @@ export default function ShotsManager() {
     addExterior,
     batchJobs = {},
     startBatchShotGeneration,
-    cancelBatchJob
+    cancelBatchJob,
+    updateSegmentCharacterOverride,
+    updateSegmentExteriorOverride,
+    uploadImage
   } = useProjectStore();
 
   const activeJob = batchJobs[`${currentProject.id}_shot`];
@@ -32,14 +35,29 @@ export default function ShotsManager() {
     const charNames = parseCharactersField(row.characters);
     for (const name of charNames) {
       const char = findBestCharacterMatch(characters, name);
+      const charId = char?.characterId || name;
+      const override = row.characterOverrides?.[charId];
+      if (override?.image) continue;
       if (!char || !char.image) return true;
     }
     const extName = (row.exterior || '').trim();
     if (extName) {
       const ext = findBestExteriorMatch(exteriors, extName);
+      const extId = ext?.exteriorId || extName;
+      const override = row.exteriorOverride;
+      if (override?.image) return false;
       if (!ext || !ext.image) return true;
     }
     return false;
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
   };
 
   const [zoomedShot, setZoomedShot] = useState<string | null>(null);
@@ -52,24 +70,34 @@ export default function ShotsManager() {
     type: 'character' | 'exterior';
     targetId: string;
     currentImage?: string;
+    stt?: number;
   } | null>(null);
 
-  const handleOpenAssignModal = (type: 'character' | 'exterior', targetId: string, currentImage?: string) => {
+  const handleOpenAssignModal = (type: 'character' | 'exterior', targetId: string, currentImage?: string, stt?: number) => {
     setAssignModal({
       isOpen: true,
       type,
       targetId,
-      currentImage
+      currentImage,
+      stt
     });
   };
 
-  const handleAssignImage = async (imageUrl: string) => {
+  const handleAssignImage = async (imageUrl: string, mediaId?: string, accountId?: string) => {
     if (!assignModal) return;
     try {
-      if (assignModal.type === 'character') {
-        await addCharacter(assignModal.targetId, imageUrl);
+      if (assignModal.stt !== undefined) {
+        if (assignModal.type === 'character') {
+          await updateSegmentCharacterOverride(assignModal.stt, assignModal.targetId, imageUrl, mediaId, accountId);
+        } else {
+          await updateSegmentExteriorOverride(assignModal.stt, imageUrl, mediaId, accountId);
+        }
       } else {
-        await addExterior(assignModal.targetId, imageUrl);
+        if (assignModal.type === 'character') {
+          await addCharacter(assignModal.targetId, imageUrl, mediaId, accountId);
+        } else {
+          await addExterior(assignModal.targetId, imageUrl, mediaId, accountId);
+        }
       }
       setAssignModal(null);
     } catch (err) {
@@ -77,18 +105,22 @@ export default function ShotsManager() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
+    try {
+      const res = await uploadImage(file);
+      const mediaId = res.media_id;
+      const accountId = (res as any).account_id || (res as any).accountId;
+      
+      const base64 = await fileToBase64(file);
       if (base64) {
-        await handleAssignImage(base64);
+        await handleAssignImage(base64, mediaId, accountId);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      alert('Không thể tải lên ảnh: ' + (err as Error).message);
+    }
   };
 
   // Pagination & Filter States
@@ -492,12 +524,14 @@ export default function ShotsManager() {
                         <div className="flex flex-wrap gap-2">
                           {charNames.map((name) => {
                             const char = findBestCharacterMatch(characters, name);
-                            const charTitle = getCardTitle(char?.characterId || name);
-                            const charImage = char?.image || '';
+                            const charId = char?.characterId || name;
+                            const override = row.characterOverrides?.[charId];
+                            const charTitle = getCardTitle(charId);
+                            const charImage = override?.image || char?.image || '';
                             return (
                               <div
                                 key={name}
-                                onClick={() => handleOpenAssignModal('character', char?.characterId || name, charImage)}
+                                onClick={() => handleOpenAssignModal('character', charId, charImage, row.stt)}
                                 className={`group relative bg-slate-950 border p-1 rounded-lg flex items-center gap-2 pr-3 hover:border-violet-500/50 transition cursor-pointer ${
                                   charImage ? 'border-slate-900/80 bg-slate-950' : 'border-dashed border-amber-900/60 bg-amber-950/5'
                                 }`}
@@ -533,11 +567,13 @@ export default function ShotsManager() {
                         </span>
                         {(() => {
                           const ext = findBestExteriorMatch(exteriors, extName);
-                          const extTitle = getCardTitle(ext?.exteriorId || extName);
-                          const extImage = ext?.image || '';
+                          const extId = ext?.exteriorId || extName;
+                          const override = row.exteriorOverride;
+                          const extTitle = getCardTitle(extId);
+                          const extImage = override?.image || ext?.image || '';
                           return (
                             <div
-                              onClick={() => handleOpenAssignModal('exterior', ext?.exteriorId || extName, extImage)}
+                              onClick={() => handleOpenAssignModal('exterior', extId, extImage, row.stt)}
                               className={`group relative bg-slate-950 border p-1 rounded-lg flex items-center gap-2 pr-3 hover:border-fuchsia-500/50 transition cursor-pointer ${
                                 extImage ? 'border-slate-900/80 bg-slate-950' : 'border-dashed border-amber-900/60 bg-amber-950/5'
                               }`}
@@ -864,7 +900,7 @@ export default function ShotsManager() {
                           {existingCharRefs.map((char) => (
                             <div 
                               key={char.characterId}
-                              onClick={() => handleAssignImage(char.image)}
+                              onClick={() => handleAssignImage(char.image, char.mediaId, char.accountId)}
                               className="group relative aspect-square bg-slate-950 border border-slate-900 rounded-lg overflow-hidden cursor-pointer hover:border-violet-500 transition shadow"
                             >
                               <img 
@@ -894,7 +930,7 @@ export default function ShotsManager() {
                           {existingExtRefs.map((ext) => (
                             <div 
                               key={ext.exteriorId}
-                              onClick={() => handleAssignImage(ext.image)}
+                              onClick={() => handleAssignImage(ext.image, ext.mediaId, ext.accountId)}
                               className="group relative aspect-video bg-slate-950 border border-slate-900 rounded-lg overflow-hidden cursor-pointer hover:border-fuchsia-500 transition shadow"
                             >
                               <img 

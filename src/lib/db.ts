@@ -57,6 +57,8 @@ export interface ImagePromptRow {
   mediaId?: string;
   accountId?: string;
   videoUrl?: string;
+  characterOverrides?: Record<string, { image: string; mediaId?: string; accountId?: string }>;
+  exteriorOverride?: { image: string; mediaId?: string; accountId?: string };
 }
 
 export interface CharacterReference {
