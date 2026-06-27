@@ -627,6 +627,10 @@ interface ProjectState {
   isGeneratingCombo1: boolean;
   isGeneratingCombo2: boolean;
   isGeneratingFullCombo: boolean;
+  isGeneratingVoice: boolean;
+  voiceProgress: { current: number; total: number; percent: number } | null;
+  setVoiceProgress: (progress: { current: number; total: number; percent: number } | null) => void;
+  setIsGeneratingVoice: (isGenerating: boolean) => void;
   assetAbortController: AbortController | null;
   cancelAssetGeneration: () => void;
   assetGeneratingIds: string[];
@@ -661,7 +665,18 @@ interface ProjectState {
   generateAllMappingAndPrompts: (resume?: boolean) => Promise<void>;
   generateCombo2: (resume?: boolean) => Promise<void>;
   generateAllShotImages: () => Promise<void>;
-  generateFullCombo: (resume?: boolean) => Promise<void>;
+  generateFullCombo: (resume?: boolean, voiceOptions?: {
+    scriptText?: string;
+    engineUrl?: string;
+    speakerId?: number | string;
+    speedScale?: number;
+    pitchScale?: number;
+    intonationScale?: number;
+    volumeScale?: number;
+    gapSeconds?: number;
+    scriptMode?: 'single' | 'multi';
+    charVoiceMap?: Record<string, number | string>;
+  }) => Promise<void>;
   generateAssetImage: (type: 'character' | 'exterior' | 'prop', id: string, config?: { model?: string; aspect_ratio?: string; count?: number }) => Promise<void>;
   generateAllAssetImages: (selectedIds?: { characters: string[]; exteriors: string[]; props?: string[] }, config?: { model?: string; aspect_ratio?: string; count?: number }) => Promise<void>;
 
@@ -1238,8 +1253,8 @@ async function executeSceneMappingIncrementalFlow(
       createdAt: new Date().toISOString(),
       provider: active.provider || provider,
       modelName: active.modelName || modelName,
-      srtContent: active.srtContent || srtContent,
-      srtMeta: active.srtMeta || { lineCount: subtitleBlocks.length, duration: '00:00:00' },
+      srtContent: srtContent || active.srtContent || '',
+      srtMeta: { lineCount: subtitleBlocks.length, duration: '00:00:00' },
       sceneMapping: [],
       imagePrompts: [],
       characters: [],
@@ -1247,6 +1262,16 @@ async function executeSceneMappingIncrementalFlow(
       props: [],
       selectedStyleId: active.selectedStyleId || 'manga_color'
     };
+
+    // Always ensure srtContent and srtMeta are populated
+    savedProj.srtContent = srtContent || active.srtContent || savedProj.srtContent || '';
+    if (savedProj.srtContent) {
+      const parsed = parseSRT(savedProj.srtContent);
+      savedProj.srtMeta = {
+        lineCount: parsed.lineCount,
+        duration: parsed.duration
+      };
+    }
     
     savedProj.sceneMapping = recalculateProjectTimeRanges(intermediateScenes, srtContent);
     savedProj.characters = knownCharacters;
@@ -1459,6 +1484,16 @@ async function executeImagePromptsContextualFlow(
       props: active.props || [],
       selectedStyleId: active.selectedStyleId || 'manga_color'
     };
+
+    // Always ensure srtContent and srtMeta are populated
+    savedProj.srtContent = active.srtContent || savedProj.srtContent || '';
+    if (savedProj.srtContent) {
+      const parsed = parseSRT(savedProj.srtContent);
+      savedProj.srtMeta = {
+        lineCount: parsed.lineCount,
+        duration: parsed.duration
+      };
+    }
     savedProj.imagePrompts = sortedPrompts;
 
     const syncedProj = syncProjectReferences(savedProj);
@@ -1529,6 +1564,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   apiConfig: {
     provider: 'gemini',
     apiKey: '',
+    apiKeyFree: '',
     modelName: 'gemini-2.5-flash',
     googleApiUrl: 'http://127.0.0.1:5000'
   },
@@ -1537,6 +1573,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ apiConfig: newConfig });
     setLocalStorage('ms_provider', newConfig.provider);
     setLocalStorage('ms_apiKey', newConfig.apiKey);
+    if (newConfig.apiKeyFree !== undefined) {
+      setLocalStorage('ms_apiKeyFree', newConfig.apiKeyFree);
+    }
     setLocalStorage('ms_modelName', newConfig.modelName);
     if (newConfig.googleApiUrl !== undefined) {
       setLocalStorage('ms_googleApiUrl', newConfig.googleApiUrl);
@@ -1624,6 +1663,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     const apiKey = localStorage.getItem('ms_apiKey') || '';
+    const apiKeyFree = localStorage.getItem('ms_apiKeyFree') || '';
     const googleApiUrl = localStorage.getItem('ms_googleApiUrl') || 'http://127.0.0.1:5000';
     
     // Force default to Gemini if no API key is saved (resets old test cache)
@@ -1702,7 +1742,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     set({
-      apiConfig: { provider, apiKey, modelName, googleApiUrl },
+      apiConfig: { provider, apiKey, apiKeyFree, modelName, googleApiUrl },
       imageGenConfig: {
         count: imageCount,
         aspectRatio: imageAspectRatio,
@@ -3483,6 +3523,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isGeneratingCombo1: false,
   isGeneratingCombo2: false,
   isGeneratingFullCombo: false,
+  isGeneratingVoice: false,
+  voiceProgress: null as { current: number; total: number; percent: number } | null,
+  setVoiceProgress: (progress) => set({ voiceProgress: progress }),
+  setIsGeneratingVoice: (isGenerating) => set({ isGeneratingVoice: isGenerating }),
   assetAbortController: null as AbortController | null,
   cancelAssetGeneration: () => {
     const controller = get().assetAbortController;
@@ -4090,7 +4134,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
 
 
-  generateFullCombo: async (resume = false) => {
+  generateFullCombo: async (resume = false, voiceOptions) => {
     let active = get().currentProject;
     let projId = active.id;
 
@@ -4100,11 +4144,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       active = get().currentProject;
     }
 
-    const srtContent = active.srtContent;
-    if (!srtContent) throw new Error('Vui lòng tải tệp phụ đề SRT lên trước.');
+    let srtContent = active.srtContent;
+    if (!voiceOptions && !srtContent) {
+      throw new Error('Vui lòng tải tệp phụ đề SRT lên trước.');
+    }
+    if (voiceOptions && !voiceOptions.scriptText?.trim()) {
+      throw new Error('Vui lòng nhập kịch bản trước khi chạy Combo Full.');
+    }
+
     const { apiKey } = get().apiConfig;
     if (!apiKey) throw new Error('Vui lòng nhập API Key trong phần cài đặt.');
-    if (!active.videoSaveDir) throw new Error('Vui lòng thiết lập thư mục lưu video trong tab Cấu hình dự án trước khi chạy Combo Full.');
+    
+    const saveDir = active.videoSaveDir;
+    if (!saveDir) throw new Error('Vui lòng thiết lập thư mục lưu video trong tab Cấu hình dự án trước khi chạy Combo Full.');
 
     set((state) => ({
       mappingAbortController: new AbortController(),
@@ -4115,6 +4167,120 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().updateGeneratingFlags(projId!);
 
     const runTask = async () => {
+      // 0. Voice generation (Mode 2)
+      if (voiceOptions && voiceOptions.scriptText) {
+        if (get().currentProject.id === projId) {
+          set({
+            isGeneratingVoice: true,
+            voiceProgress: null,
+            batchStatus: 'Đang tự động sinh giọng nói & phụ đề từ kịch bản...'
+          });
+        }
+        
+        try {
+          const voicePath = saveDir.endsWith('\\') || saveDir.endsWith('/')
+            ? saveDir + 'voice'
+            : saveDir + '\\voice';
+
+          const response = await fetch('/api/video/voice/generate-script', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              scriptText: voiceOptions.scriptText,
+              engineUrl: voiceOptions.engineUrl,
+              voiceDir: voicePath,
+              speakerId: voiceOptions.speakerId,
+              speedScale: voiceOptions.speedScale,
+              pitchScale: voiceOptions.pitchScale,
+              intonationScale: voiceOptions.intonationScale,
+              volumeScale: voiceOptions.volumeScale,
+              gapSeconds: voiceOptions.gapSeconds,
+              scriptMode: voiceOptions.scriptMode,
+              charVoiceMap: voiceOptions.charVoiceMap
+            })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Lỗi không xác định khi sinh Voice.' }));
+            throw new Error(errorData.error || 'Lỗi không xác định khi sinh Voice.');
+          }
+
+          const reader = response.body?.getReader();
+          if (!reader) {
+            throw new Error('ReadableStream không được hỗ trợ.');
+          }
+
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let finalData: any = null;
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                try {
+                  const parsed = JSON.parse(trimmed);
+                  if (parsed.type === 'progress') {
+                    set({
+                      voiceProgress: {
+                        current: parsed.current,
+                        total: parsed.total,
+                        percent: parsed.percent
+                      },
+                      batchStatus: `Đang sinh giọng nói: ${parsed.current}/${parsed.total} (${parsed.percent}%)`
+                    });
+                  } else if (parsed.type === 'done') {
+                    finalData = parsed;
+                  } else if (parsed.type === 'error') {
+                    throw new Error(parsed.error);
+                  }
+                } catch (e: any) {
+                  if (e.message.startsWith('Lỗi trong quá trình sinh giọng nói') || e.message.startsWith('Lỗi:')) {
+                    throw e;
+                  }
+                  console.error('Failed to parse NDJSON line:', trimmed, e);
+                }
+              }
+            }
+          } finally {
+            reader.releaseLock();
+          }
+
+          if (finalData && finalData.success && finalData.srtContent) {
+            get().setSrtContent(finalData.srtContent, active.name);
+            get().setCurrentProjectField('scriptContent', voiceOptions.scriptText);
+            await get().saveCurrentProject(); // Explicitly await saving everything to DB
+            srtContent = finalData.srtContent;
+          } else {
+            throw new Error('Sinh giọng nói thất bại hoặc không nhận được kết quả hoàn tất.');
+          }
+        } catch (err: any) {
+          console.error('[Combo Full Voice Gen] Error:', err);
+          throw new Error(`[Lỗi sinh Voice] ${err.message}`);
+        } finally {
+          set({
+            isGeneratingVoice: false,
+            voiceProgress: null
+          });
+        }
+      }
+
+      // Check if aborted/cancelled during voice gen
+      if (!get().runningCombos[projId!]) {
+        console.log('[Combo Full] Aborted after voice generation.');
+        return;
+      }
+
       // 1. Scene Mapping
       set((state) => ({
         runningProjects: { ...state.runningProjects, [projId!]: 'mapping' as const }
@@ -4343,6 +4509,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           set({ batchStatus: 'Đang khởi chạy tiến trình xuất phim (.mp4) tổng hợp...' });
         }
 
+        // Load subtitle styling and burn setting from localStorage (if browser context)
+        let subtitleStyle: any = {
+          fontSize: 24,
+          fontFamily: 'sans-serif',
+          textColor: '#ffffff',
+          outlineColor: '#000000',
+          outlineWidth: 2,
+          verticalAlign: 'bottom',
+          bgOpacity: 0.4
+        };
+        let burnSubtitlesVal = true;
+        if (typeof window !== 'undefined') {
+          try {
+            subtitleStyle = {
+              fontSize: Number(localStorage.getItem('cinema_sub_fontSize') || '24'),
+              fontFamily: localStorage.getItem('cinema_sub_fontFamily') || 'sans-serif',
+              textColor: localStorage.getItem('cinema_sub_textColor') || '#ffffff',
+              outlineColor: localStorage.getItem('cinema_sub_outlineColor') || '#000000',
+              outlineWidth: Number(localStorage.getItem('cinema_sub_outlineWidth') || '2'),
+              verticalAlign: localStorage.getItem('cinema_sub_verticalAlign') || 'bottom',
+              bgOpacity: Number(localStorage.getItem('cinema_sub_bgOpacity') || '0.4')
+            };
+            const storedBurn = localStorage.getItem('cinema_sub_burnSubtitles');
+            if (storedBurn !== null) {
+              burnSubtitlesVal = storedBurn !== 'false';
+            }
+          } catch (e) {
+            console.error('Failed to load subtitle settings from localStorage:', e);
+          }
+        }
+
         // Call the export POST endpoint
         const exportRes = await fetch('/api/video/export', {
           method: 'POST',
@@ -4355,11 +4552,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             sceneMapping: finalProj.sceneMapping || [],
             imagePrompts: finalProj.imagePrompts || [],
             srtContent: finalProj.srtContent || '',
-            style: get().getSelectedStyle() || {},
+            style: subtitleStyle,
             videoSaveDir: finalProj.videoSaveDir,
             videoType: 'mixed',
             bgmVolumeDb: -18,
-            bgmSuggestions: finalProj.bgmSuggestions || []
+            bgmSuggestions: finalProj.bgmSuggestions || [],
+            burnSubtitles: burnSubtitlesVal
           })
         });
 

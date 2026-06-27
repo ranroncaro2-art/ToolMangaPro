@@ -30,22 +30,29 @@ function parseTimestampToSeconds(ts: string): number {
 function getSubtitlesForScene(subtitleRange: any, blocks: any[]): any[] {
   if (!subtitleRange) return [];
   const rangeStr = String(subtitleRange);
-  const parts = rangeStr.split('-').map(x => parseInt(x.trim(), 10));
-  if (parts.length === 1 && !isNaN(parts[0])) {
-    const id = parts[0];
-    return blocks.filter(b => {
-      const origId = b.id >= 1000 ? Math.floor(b.id / 1000) : b.id;
-      return origId === id;
-    });
-  } else if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-    const start = parts[0];
-    const end = parts[1];
-    return blocks.filter(b => {
-      const origId = b.id >= 1000 ? Math.floor(b.id / 1000) : b.id;
-      return origId >= start && origId <= end;
-    });
+  const segments = rangeStr.split(',');
+  const subIds = new Set<number>();
+
+  for (const seg of segments) {
+    const trimmed = seg.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split('-').map(x => parseInt(x.trim(), 10));
+    if (parts.length === 1 && !isNaN(parts[0])) {
+      subIds.add(parts[0]);
+    } else if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      const start = Math.min(parts[0], parts[1]);
+      const end = Math.max(parts[0], parts[1]);
+      for (let i = start; i <= end; i++) {
+        subIds.add(i);
+      }
+    }
   }
-  return [];
+
+  return blocks.filter(b => {
+    const rawId = typeof b.id === 'number' ? b.id : parseInt(b.id, 10);
+    const origId = rawId >= 1000 ? Math.floor(rawId / 1000) : rawId;
+    return subIds.has(origId);
+  });
 }
 
 // Helper to check if a scene has its video or image asset
@@ -187,7 +194,8 @@ export async function POST(req: Request) {
       bgmSuggestions = [],
       burnSubtitles = false,
       validateOnly = false,
-      hookSegments = []
+      hookSegments = [],
+      includeBgm = true
     } = body;
 
     console.log('[Export Video API] Request payload parsed successfully:', {
@@ -288,7 +296,7 @@ export async function POST(req: Request) {
 
     // Validate BGM files
     const missingBgms: string[] = [];
-    if (bgmSuggestions && bgmSuggestions.length > 0) {
+    if (includeBgm && bgmSuggestions && bgmSuggestions.length > 0) {
       bgmSuggestions.forEach((bgm: any) => {
         if (!bgm.audioFile) {
           missingBgms.push(`  + Đoạn "${bgm.title || 'BGM'}" (Chưa chọn file local)`);
@@ -348,7 +356,7 @@ export async function POST(req: Request) {
     });
 
     // Resolve BGM segments and check file existence
-    const bgmSegments = bgmSuggestions.map((bgm: any) => {
+    const bgmSegments = includeBgm ? bgmSuggestions.map((bgm: any) => {
       const parts = (bgm.timeRange || '').split('-').map((p: string) => p.trim());
       let start = 0;
       let end = 0;
@@ -373,7 +381,7 @@ export async function POST(req: Request) {
         start,
         end
       };
-    }).filter((x: any) => x.audioPath && fs.existsSync(x.audioPath));
+    }).filter((x: any) => x.audioPath && fs.existsSync(x.audioPath)) : [];
 
     const compilerPayload = {
       scenes: compilerScenes,

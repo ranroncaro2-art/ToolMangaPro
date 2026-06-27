@@ -3,6 +3,7 @@ import { SceneMappingRow, ImagePromptRow } from '../db';
 export interface AIConfig {
   provider: 'openai' | 'gemini' | 'claude';
   apiKey: string;
+  apiKeyFree?: string;
   modelName: string;
   projectId?: string;
   type?: 'mapping' | 'prompts' | 'general' | string;

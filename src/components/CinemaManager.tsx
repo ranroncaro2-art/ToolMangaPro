@@ -612,6 +612,7 @@ export default function CinemaManager() {
   const [voiceFiles, setVoiceFiles] = useState<{ path: string; duration: number }[]>([]);
   const [subToVoiceMap, setSubToVoiceMap] = useState<Record<number, { path: string; duration: number }>>({});
   const [burnSubtitles, setBurnSubtitles] = useState<boolean>(true);
+  const [includeBgm, setIncludeBgm] = useState<boolean>(true);
   const [validationStatus, setValidationStatus] = useState<{
     isValidating: boolean;
     success: boolean | null;
@@ -624,7 +625,7 @@ export default function CinemaManager() {
     errors: []
   });
 
-  const validateAssets = async (typeToValidate = videoType) => {
+  const validateAssets = async (typeToValidate = videoType, checkBgm = includeBgm) => {
     if (!currentProject?.id || !currentProject?.videoSaveDir) return;
     setValidationStatus({ isValidating: true, success: null, message: '', errors: [] });
     try {
@@ -644,7 +645,8 @@ export default function CinemaManager() {
           bgmVolumeDb: currentProject?.bgmVolumeDb ?? -18,
           bgmSuggestions: currentProject?.bgmSuggestions || [],
           validateOnly: true,
-          hookSegments: currentProject?.hookSegments || []
+          hookSegments: currentProject?.hookSegments || [],
+          includeBgm: checkBgm
         })
       });
       
@@ -676,9 +678,9 @@ export default function CinemaManager() {
 
   useEffect(() => {
     if (showExportConfig && currentProject?.id && currentProject?.videoSaveDir) {
-      validateAssets(videoType);
+      validateAssets(videoType, includeBgm);
     }
-  }, [showExportConfig, videoType, currentProject?.id, currentProject?.videoSaveDir]);
+  }, [showExportConfig, videoType, currentProject?.id, currentProject?.videoSaveDir, includeBgm]);
 
   // Parse SRT Blocks and split long sentences into sequential subtitles
   const srtBlocks = useMemo(() => {
@@ -731,6 +733,14 @@ export default function CinemaManager() {
       setBgOpacity(Number(localStorage.getItem('cinema_sub_bgOpacity') || '0.4'));
       setMaxLineLength(Number(localStorage.getItem('cinema_sub_maxLineLength') || '38'));
       setMaxWordsLimit(Number(localStorage.getItem('cinema_sub_maxWordsLimit') || '7'));
+      const storedBurn = localStorage.getItem('cinema_sub_burnSubtitles');
+      if (storedBurn !== null) {
+        setBurnSubtitles(storedBurn !== 'false');
+      }
+      const storedBgm = localStorage.getItem('cinema_sub_includeBgm');
+      if (storedBgm !== null) {
+        setIncludeBgm(storedBgm !== 'false');
+      }
     }
   }, []);
 
@@ -1044,7 +1054,8 @@ export default function CinemaManager() {
           bgmVolumeDb: currentProject?.bgmVolumeDb ?? -18,
           bgmSuggestions: currentProject?.bgmSuggestions || [],
           burnSubtitles: burnSubtitles,
-          hookSegments: currentProject?.hookSegments || []
+          hookSegments: currentProject?.hookSegments || [],
+          includeBgm: includeBgm
         })
       });
 
@@ -3122,18 +3133,39 @@ export default function CinemaManager() {
               </select>
             </div>
 
-            {/* Subtitle Checkbox */}
-            <div className="flex items-center gap-3 bg-slate-950/40 p-3.5 rounded-xl border border-slate-900/60">
-              <input
-                type="checkbox"
-                id="burnSubtitlesCheckbox"
-                checked={burnSubtitles}
-                onChange={(e) => setBurnSubtitles(e.target.checked)}
-                className="w-4 h-4 accent-violet-600 rounded bg-slate-950 border border-slate-850 cursor-pointer"
-              />
-              <label htmlFor="burnSubtitlesCheckbox" className="text-xs font-bold text-slate-350 cursor-pointer select-none">
-                Ghép cứng phụ đề (Burn subtitles vào video)
-              </label>
+            {/* Subtitle & BGM Checkboxes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex items-center gap-3 bg-slate-950/40 p-3.5 rounded-xl border border-slate-900/60">
+                <input
+                  type="checkbox"
+                  id="burnSubtitlesCheckbox"
+                  checked={burnSubtitles}
+                  onChange={(e) => {
+                    setBurnSubtitles(e.target.checked);
+                    localStorage.setItem('cinema_sub_burnSubtitles', String(e.target.checked));
+                  }}
+                  className="w-4 h-4 accent-violet-600 rounded bg-slate-950 border border-slate-850 cursor-pointer"
+                />
+                <label htmlFor="burnSubtitlesCheckbox" className="text-xs font-bold text-slate-350 cursor-pointer select-none">
+                  Ghép cứng phụ đề (Burn sub)
+                </label>
+              </div>
+
+              <div className="flex items-center gap-3 bg-slate-950/40 p-3.5 rounded-xl border border-slate-900/60">
+                <input
+                  type="checkbox"
+                  id="includeBgmCheckbox"
+                  checked={includeBgm}
+                  onChange={(e) => {
+                    setIncludeBgm(e.target.checked);
+                    localStorage.setItem('cinema_sub_includeBgm', String(e.target.checked));
+                  }}
+                  className="w-4 h-4 accent-violet-600 rounded bg-slate-950 border border-slate-850 cursor-pointer"
+                />
+                <label htmlFor="includeBgmCheckbox" className="text-xs font-bold text-slate-350 cursor-pointer select-none">
+                  Chèn nhạc nền (BGM)
+                </label>
+              </div>
             </div>
 
             {/* Voice Directory Input */}
