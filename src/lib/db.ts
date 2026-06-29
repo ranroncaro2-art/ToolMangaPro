@@ -15,6 +15,7 @@ export interface Project {
   exteriors?: ExteriorReference[];
   props?: PropReference[];
   selectedStyleId?: string;
+  selectedGenreId?: string;
   videoSaveDir?: string;
   autoDownloadVideo?: boolean;
   bgmSuggestions?: BgmSuggestionRow[];

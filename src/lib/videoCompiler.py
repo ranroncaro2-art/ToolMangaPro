@@ -10,6 +10,19 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import subprocess
 
+# Force stdout and stderr to use UTF-8 encoding to avoid UnicodeEncodeError in console output on Windows
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        pass
+if sys.stderr.encoding != 'utf-8':
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except AttributeError:
+        pass
+
+
 # Helper to convert HEX to RGB tuple
 def hex_to_rgb(hex_str):
     hex_str = hex_str.lstrip('#')

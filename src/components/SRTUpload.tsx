@@ -1,9 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import FolderPickerModal from './FolderPickerModal';
-import { Upload, FileText, Clock, Sparkles, CheckCircle2, AlertTriangle, Play, Palette, Settings, Plus, Trash2, Save, Download, FolderOpen, RefreshCw, Volume2, Search, Check, X, Headphones, Sliders } from 'lucide-react';
+import { Upload, FileText, Clock, Sparkles, CheckCircle2, AlertTriangle, Play, Palette, Settings, Plus, Trash2, Save, Download, FolderOpen, RefreshCw, Volume2, Search, Check, X, Headphones, Sliders, BookOpen } from 'lucide-react';
 import { parseSRT, matchScriptWithSrt } from '../lib/srtParser';
 import { getSpeakerCategory } from '../lib/voiceHelper';
+import { DEFAULT_GENRES, getGenreById } from '../lib/genres';
 
 export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
   const {
@@ -29,6 +30,7 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
     setTargetDuration,
     styles = [],
     setSelectedStyleId,
+    setSelectedGenreId,
     addStyle,
     updateStyle,
     deleteStyle,
@@ -2299,6 +2301,65 @@ Ví dụ:
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Story Genre Selection */}
+            <div className="bg-slate-900/40 border border-slate-900 rounded-xl p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-950 pb-3">
+                <BookOpen className="w-5 h-5 text-violet-400" />
+                <h3 className="font-bold text-slate-200 text-sm">Thể loại truyện</h3>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                    Chọn thể loại cốt truyện (Genre)
+                  </label>
+                  <select
+                    value={currentProject.selectedGenreId || 'none'}
+                    onChange={(e) => setSelectedGenreId(e.target.value)}
+                    className="w-full bg-slate-950 border border-gray-900 rounded-lg text-xs text-slate-200 px-3 py-2 focus:outline-none focus:border-violet-500 transition cursor-pointer"
+                  >
+                    {DEFAULT_GENRES.map((genre) => (
+                      <option key={genre.id} value={genre.id}>
+                        {genre.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Show Genre Info */}
+                {(() => {
+                  const genre = getGenreById(currentProject.selectedGenreId || 'none');
+                  return (
+                    <div className="space-y-2">
+                      <div className="text-[10px] text-gray-400 font-medium">
+                        {genre.description}
+                      </div>
+                      {genre.id !== 'none' && (
+                        <div className="bg-slate-950 p-3 rounded-lg border border-slate-900/60 text-[10px] space-y-2.5 max-h-[220px] overflow-y-auto scrollbar-thin">
+                          <div>
+                            <div className="text-[10px] text-violet-400 font-semibold uppercase tracking-wider mb-1">
+                              Bối cảnh phân cảnh (Step 1)
+                            </div>
+                            <div className="text-slate-300 italic whitespace-pre-line font-sans leading-relaxed">
+                              {genre.mappingSpec.replace('[THỂ LOẠI: ' + genre.name.toUpperCase() + ']\n', '')}
+                            </div>
+                          </div>
+                          <div className="border-t border-slate-900/80 pt-2.5 mt-2">
+                            <div className="text-[10px] text-violet-400 font-semibold uppercase tracking-wider mb-1">
+                              Bối cảnh vẽ ảnh (Step 2)
+                            </div>
+                            <div className="text-slate-300 italic whitespace-pre-line font-sans leading-relaxed">
+                              {genre.imageSpec.replace('[THỂ LOẠI: ' + genre.name.toUpperCase() + ']\n', '')}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           
         </div>

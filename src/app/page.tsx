@@ -8,12 +8,11 @@ import SRTUpload from '../components/SRTUpload';
 import SceneMappingGrid from '../components/SceneMappingGrid';
 import ImagePromptGrid from '../components/ImagePromptGrid';
 import ReferenceManager from '../components/ReferenceManager';
-import PromptManager from '../components/PromptManager';
 import ShotsManager from '../components/ShotsManager';
 import VideoManager from '../components/VideoManager';
 import CinemaManager from '../components/CinemaManager';
 import GlobalQueueMonitor from '../components/GlobalQueueMonitor';
-import { UploadCloud, Table, Sparkles, FolderOpen, Sliders, Film, Play, Tv, Loader2, RefreshCw } from 'lucide-react';
+import { UploadCloud, Table, Sparkles, FolderOpen, Film, Play, Tv, Loader2, RefreshCw } from 'lucide-react';
 import { useProjectStore } from '../store/useProjectStore';
 import LoginScreen from '../components/LoginScreen';
 
@@ -24,7 +23,7 @@ import { AllCommunityModule } from 'ag-grid-community';
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'upload' | 'mapping' | 'prompts' | 'shots' | 'references' | 'video' | 'cinema' | 'templates'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'mapping' | 'prompts' | 'shots' | 'references' | 'video' | 'cinema'>('upload');
   const { initializeStore, currentProject, loadHistory, loadProject, saveCurrentProject, exportProject } = useProjectStore();
 
   // Refresh state
@@ -376,20 +375,6 @@ export default function Home() {
                 <Tv className="w-4 h-4" />
                 7. Rạp phim
               </button>
-
-              <div className="h-5 w-px bg-gray-900 mx-2 hidden sm:block" />
-
-              <button
-                onClick={() => setActiveTab('templates')}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wide transition cursor-pointer select-none ${
-                  activeTab === 'templates'
-                    ? 'bg-slate-900 text-violet-400 border border-gray-800'
-                    : 'text-gray-400 hover:text-slate-200 hover:bg-slate-900/40'
-                }`}
-              >
-                <Sliders className="w-4 h-4" />
-                Prompt Templates
-              </button>
             </div>
 
             <div className="flex items-center gap-2 shrink-0 pr-2">
@@ -431,9 +416,6 @@ export default function Home() {
               )}
               {activeTab === 'cinema' && (
                 <CinemaManager />
-              )}
-              {activeTab === 'templates' && (
-                <PromptManager />
               )}
             </div>
           </div>

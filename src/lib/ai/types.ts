@@ -10,6 +10,7 @@ export interface AIConfig {
   label?: string;
   googleApiUrl?: string;
   signal?: AbortSignal;
+  selectedGenreId?: string;
 }
 
 export interface TokenUsage {

@@ -1,5 +1,7 @@
 import { AIProvider, AIConfig, AIResponse } from './types';
 import { SceneMappingRow, ImagePromptRow } from '../db';
+import { getGenreById, formatGenreKnowledgeBase } from '../genres';
+import { formatRoleLibrary, formatExteriorLibrary, formatPropLibrary } from '../roles';
 
 // Helper to repair truncated or malformed JSON
 export function repairJson(jsonStr: string): string {
@@ -250,7 +252,15 @@ async function callProxy(
 }
 
 // System instructions for incremental scene mapping
-const SCENE_MAPPING_INCREMENTAL_SYSTEM = `You are a professional storyboard mapping director. Analyze the SRT subtitle chunk and map it to a logical scene flow.
+function getSceneMappingSystemPrompt(selectedGenreId: string | undefined): string {
+  const selectedGenre = getGenreById(selectedGenreId || 'none');
+  const styleContext = selectedGenre.characterStyleContext || 'modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism';
+  const genreKnowledgeBase = formatGenreKnowledgeBase(selectedGenre);
+  const roleLibrary = formatRoleLibrary();
+  const exteriorLibrary = formatExteriorLibrary();
+  const propLibrary = formatPropLibrary();
+
+  return `You are a professional storyboard mapping director. Analyze the SRT subtitle chunk and map it to a logical scene flow.
 To maintain visual consistency and story continuity, you must respect the existing project context provided:
 1. Known Characters: Look at this list. If a character in this chunk matches an existing one, use their exact 'characterId'. Only if you find a completely new character, describe them in 'newCharacters'.
 2. Known Locations: Look at this list. If a scene takes place in an existing location, use their exact 'exteriorId'. Only if it's a new location, describe them in 'newExteriors'.
@@ -272,19 +282,27 @@ To maintain visual consistency and story continuity, you must respect the existi
    - In the 'scenes' list, use the exact variant ID (e.g., 'momoka_home') in the 'characters' field for that scene.
    - Do not create variants for minor characters or background extras; only apply this to main characters.
 
+[CHARACTER PROMPT COMPOSITION RULES]:
+1. Identify the character's Role/Identity from dialogue and context (e.g., Queen, Knight, Mage, Peasant).
+2. Reference both the [WORLD SPECIFICATION & KNOWLEDGE BASE] of the selected genre AND the [ROLE REFERENCE LIBRARY].
+3. Synthesize the character's clothing and style to fit the world rules dynamically.
+   - For example, if the Genre is "Action Isekai" and the Role is "Queen", she should wear an exquisite fantasy gown or military royal uniform suitable for Isekai.
+   - If the Genre is "Dark Fantasy" and the Role is "Queen", she should wear a dark ceremonial gown, black velvet, and obsidian crown.
+   - If the Genre is "Royal Fantasy" and the Role is "Queen", she should wear a luxurious white/royal blue silk gown with gold embroidery.
+   - Do NOT blindly use default warrior armor for royal, servant, or merchant characters. Adjust materials (silk, velvet, steel plate, worn leather) to fit the role's status.
+4. Output EXACTLY the format specified below in [GUIDELINE FOR NEW CHARACTERS].
 
 [GUIDELINE FOR NEW CHARACTERS]:
-For each new character, generate a prompt matching EXACTLY this format (replace [Name] and [detailed physical description]):
-"Character Sheet of [Name], 3-view reference sheet (front, side, back), full body, white background, modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism, modern colored manga anime style, [detailed physical description], modern fashionable Japanese clothing, restrained emotional presence, natural standing posture, neutral facial expression, realistic fabric folds, cinematic realism, production design reference sheet."
-
+For each new character, generate a prompt matching EXACTLY this format:
+"Character Sheet of [Character Name], 3-view reference sheet (front, side, back), Official character concept art, full body, standing pose, pure white background, [detailed physical appearance description (age, hair, eyes, skin, features, facial expression, posture)], wearing [exquisite role-specific clothing description using luxurious materials, textures, and details suitable for the character's role], Style: ${styleContext}, masterpiece, ultra detailed, sharp focus, official artwork, production quality"
 
 [GUIDELINE FOR NEW LOCATIONS]:
-For each new location/exterior, generate a prompt matching EXACTLY this format (replace [Location_Name_X] and [detailed environment description]):
-"Background layout sheet of [Location_Name_X], 4-camera-angle sheet showing 4 different viewpoints/angles (front, reverse, left side, right side) of the same scene in a 2x2 grid layout, empty scene, no people, modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics, modern colored manga anime style, [detailed environment description showing consistent furniture and layout across all 4 angles], realistic practical lighting, subtle emotional atmosphere, believable lived-in details, cinematic depth, production-ready environment design reference sheet."
+For each new location/exterior, generate a prompt matching EXACTLY this format:
+"Official environment concept art, wide angle shot, empty scene, no people, [detailed environment description showing consistent furniture, structural details, and layouts], [lighting and atmosphere description], Style: ${styleContext}, masterpiece, ultra detailed, atmospheric depth"
 
 [GUIDELINE FOR NEW PROPS]:
-For each new prop, generate a prompt matching EXACTLY this format (replace [Prop_Name_X] and [detailed prop description]):
-"Product layout sheet of [Prop_Name_X], showing the item from multiple clean angles (front, side, isometric), isolated on a pure white background, modern present-day Japan design, avoiding retro appearance, modern colored manga anime style, [detailed prop description showing consistent colors, materials, and form], realistic textures, clean studio lighting, production design reference sheet."
+For each new prop, generate a prompt matching EXACTLY this format:
+"Official product design sheet, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white studio background, [materials and description based on prop type and genre], [visual details, worn marks, and handles], clean studio lighting, realistic textures, premium concept art, Style: ${styleContext}"
 
 Your response MUST BE A JSON OBJECT (NOT AN ARRAY) containing:
 {
@@ -325,7 +343,9 @@ Your response MUST BE A JSON OBJECT (NOT AN ARRAY) containing:
   "plotSummary": "string (updated short summary of the story/plot up to the end of this chunk)"
 }
 
-Do not include any pre-text or post-text. Return ONLY the JSON object.`;
+Do not include any pre-text or post-text. Return ONLY the JSON object.
+${genreKnowledgeBase}${roleLibrary}${exteriorLibrary}${propLibrary}`;
+}
 
 // System instructions for contextual image prompt generation
 const IMAGE_PROMPTS_CONTEXTUAL_SYSTEM = `You are an expert manga storyboard prompt generator. Convert the scene descriptions into image/animation prompts.
@@ -384,7 +404,7 @@ ${srtChunkContent}`;
       config.apiKey,
       config.modelName,
       prompt,
-      SCENE_MAPPING_INCREMENTAL_SYSTEM,
+      getSceneMappingSystemPrompt(config.selectedGenreId),
       'json',
       config.projectId,
       config.type,
@@ -580,7 +600,7 @@ ${srtChunkContent}`;
       config.apiKey,
       config.modelName,
       prompt,
-      SCENE_MAPPING_INCREMENTAL_SYSTEM,
+      getSceneMappingSystemPrompt(config.selectedGenreId),
       'json',
       config.projectId,
       config.type,
@@ -676,7 +696,7 @@ ${srtChunkContent}`;
       config.apiKey,
       config.modelName,
       prompt,
-      SCENE_MAPPING_INCREMENTAL_SYSTEM,
+      getSceneMappingSystemPrompt(config.selectedGenreId),
       'text',
       config.projectId,
       config.type,

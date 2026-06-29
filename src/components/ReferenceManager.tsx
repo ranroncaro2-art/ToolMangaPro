@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useProjectStore, getDisplayName, getCardTitle } from '../store/useProjectStore';
+import { getGenreById } from '../lib/genres';
+import { getRoleSpecificPrompt, getExteriorSpecificPrompt, getPropSpecificPrompt } from '../lib/roles';
 import type { Project } from '../lib/db';
 import { User, Image as ImageIcon, Trash2, Plus, UploadCloud, Loader2, Maximize2, Sparkles, Square, Sliders, Package, X } from 'lucide-react';
 
@@ -185,19 +187,28 @@ export default function ReferenceManager() {
   const getCharPrompt = (id: string) => {
     const name = id.trim() ? getDisplayName(id) : '{character_name}';
     const characterSuffix = activeStyle?.characterSuffix || 'modern colored manga anime style';
-    return `Character Sheet of ${name}, 3-view reference sheet (front, side, back), full body, white background, modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism, ${characterSuffix}, [detailed physical description], modern fashionable Japanese clothing, restrained emotional presence, natural standing posture, neutral facial expression, realistic fabric folds, cinematic realism, production design reference sheet.`;
+    const selectedGenre = getGenreById(currentProject?.selectedGenreId || 'none');
+    const styleContext = selectedGenre.characterStyleContext || 'modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism';
+    const rolePrompt = getRoleSpecificPrompt(id, selectedGenre);
+    return `Character Sheet of ${name}, 3-view reference sheet (front, side, back), Official character concept art, full body, standing pose, pure white background, ${rolePrompt.appearance}, wearing ${rolePrompt.clothing}, ${rolePrompt.accessories}, ${rolePrompt.posture}, ${rolePrompt.emotion}, Style: ${styleContext}, ${characterSuffix}, masterpiece, ultra detailed, sharp focus, official artwork, production quality`;
   };
 
   const getExtPrompt = (id: string) => {
     const name = id.trim() ? getDisplayName(id) : '{background_name}';
     const backgroundSuffix = activeStyle?.backgroundSuffix || 'modern colored manga anime style';
-    return `Background layout sheet of ${name}, 4-camera-angle sheet showing 4 different viewpoints/angles (front, reverse, left side, right side) of the same scene in a 2x2 grid layout, empty scene, no people, modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics, ${backgroundSuffix}, [detailed environment description showing consistent furniture and layout across all 4 angles], realistic practical lighting, subtle emotional atmosphere, believable lived-in details, cinematic depth, production-ready environment design reference sheet.`;
+    const selectedGenre = getGenreById(currentProject?.selectedGenreId || 'none');
+    const exteriorContext = selectedGenre.exteriorStyleContext || 'modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics';
+    const extPrompt = getExteriorSpecificPrompt(id, selectedGenre);
+    return `Official environment concept art, wide angle shot, empty scene, no people, ${extPrompt.elements}, ${extPrompt.lighting}, ${extPrompt.atmosphere}, Style: ${exteriorContext}, ${backgroundSuffix}, masterpiece, ultra detailed, atmospheric depth`;
   };
 
   const getPropPrompt = (id: string) => {
     const name = id.trim() ? getDisplayName(id) : '{prop_name}';
     const characterSuffix = activeStyle?.characterSuffix || 'modern colored manga anime style';
-    return `Product layout sheet of ${name}, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white background, modern present-day Japan design, avoiding retro appearance, ${characterSuffix}, [detailed prop description showing consistent colors, materials, and form], realistic textures, clean studio lighting, production design reference sheet.`;
+    const selectedGenre = getGenreById(currentProject?.selectedGenreId || 'none');
+    const propContext = selectedGenre.propStyleContext || 'modern present-day Japan design, avoiding retro appearance';
+    const propPrompt = getPropSpecificPrompt(id, selectedGenre);
+    return `Official product design sheet, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white studio background, ${propPrompt.materials}, ${propPrompt.details}, clean studio lighting, realistic textures, premium concept art, Style: ${propContext}, ${characterSuffix}`;
   };
 
   const toggleSelectCharacter = (id: string) => {

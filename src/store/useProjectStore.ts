@@ -23,6 +23,8 @@ import {
 } from '../lib/db';
 import { parseSRT } from '../lib/srtParser';
 import { AIProviderFactory } from '../lib/ai/factory';
+import { getGenreById, formatGenreKnowledgeBase } from '../lib/genres';
+import { getRoleSpecificPrompt, getExteriorSpecificPrompt, getPropSpecificPrompt } from '../lib/roles';
 import { AIConfig } from '../lib/ai/types';
 
 const syncChannel = typeof window !== 'undefined' ? new BroadcastChannel('manga_project_sync') : null;
@@ -559,6 +561,10 @@ interface ProjectState {
   deleteStyle: (id: string) => void;
   getSelectedStyle: () => DrawingStyle;
 
+  // Story genres
+  setSelectedGenreId: (id: string) => void;
+  getSelectedGenre: () => any; // Returns StoryGenre
+
   // Prompts Templates
   sceneMappingPrompt: string;
   imagePromptPrompt: string;
@@ -1059,7 +1065,13 @@ async function executeSceneMappingIncrementalFlow(
   const { provider, apiKey, modelName } = apiConfig;
   const providerInstance = AIProviderFactory.getProvider(provider);
 
-  const customPrompt = `${sceneMappingPrompt}
+  const active = get().currentProject;
+  const selectedGenre = getGenreById(active.selectedGenreId);
+  const genreMappingSpec = selectedGenre.mappingSpec 
+    ? `\n\n[BỐI CẢNH & QUY TẮC THỂ LOẠI: ${selectedGenre.name.toUpperCase()}]\n${selectedGenre.mappingSpec}` 
+    : '';
+
+  const customPrompt = `${sceneMappingPrompt}${genreMappingSpec}
 
 [YÊU CẦU ĐẶC BIỆT VỀ THỜI LƯỢNG CẢNH (SCENE DURATION)]:
 - Thời lượng tối đa cho mỗi cảnh (Time Range) KHÔNG ĐƯỢC VƯỢT QUÁ ${targetDuration} giây.
@@ -1081,7 +1093,6 @@ async function executeSceneMappingIncrementalFlow(
   let startIndex = 0;
 
   if (resume) {
-    const active = get().currentProject;
     allScenes = active.sceneMapping ? [...active.sceneMapping] : [];
     knownCharacters = active.characters ? [...active.characters] : [];
     knownExteriors = active.exteriors ? [...active.exteriors] : [];
@@ -1136,7 +1147,8 @@ async function executeSceneMappingIncrementalFlow(
       projectId: projId,
       type: 'mapping' as const,
       label: `Phần ${chunkIndex}/${totalChunks}`,
-      signal
+      signal,
+      selectedGenreId: active.selectedGenreId || 'none'
     };
 
     const response = await providerInstance.generateSceneMappingIncremental(
@@ -1246,7 +1258,6 @@ async function executeSceneMappingIncrementalFlow(
     }));
 
     // Save intermediate progress to DB
-    const active = get().currentProject;
     const savedProj = (await getProject(projId)) || {
       id: projId,
       name: active.name || 'Dự án phụ đề',
@@ -1260,7 +1271,8 @@ async function executeSceneMappingIncrementalFlow(
       characters: [],
       exteriors: [],
       props: [],
-      selectedStyleId: active.selectedStyleId || 'manga_color'
+      selectedStyleId: active.selectedStyleId || 'manga_color',
+      selectedGenreId: active.selectedGenreId || 'none'
     };
 
     // Always ensure srtContent and srtMeta are populated
@@ -1358,7 +1370,13 @@ async function executeImagePromptsContextualFlow(
   const totalBatches = Math.ceil(sceneMapping.length / batchSize);
   const signal = get().promptsAbortController?.signal;
 
-  const finalImagePromptPrompt = `${imagePromptPrompt}
+  const selectedGenre = getGenreById(active.selectedGenreId);
+  const genreImageSpec = selectedGenre.imageSpec 
+    ? `\n\n[BỐI CẢNH & QUY TẮC THỂ LOẠI: ${selectedGenre.name.toUpperCase()}]\n${selectedGenre.imageSpec}` 
+    : '';
+  const genreKnowledgeBase = formatGenreKnowledgeBase(selectedGenre);
+
+  const finalImagePromptPrompt = `${imagePromptPrompt}${genreImageSpec}${genreKnowledgeBase}
         
 [YÊU CẦU ĐẶC BIỆT VỀ PHONG CÁCH VẼ (DRAWING STYLE OVERRIDE)]:
 - CỰC KỲ QUAN TRỌNG: Tuyệt đối KHÔNG viết hoặc mô tả bất kỳ từ khóa style vẽ nào (như nét vẽ manga, anime, màu sắc, (no text, no subtitle, manga color style),...) vào trường "description". Chỉ mô tả bối cảnh và diễn biến cơ bản.
@@ -1482,7 +1500,8 @@ async function executeImagePromptsContextualFlow(
       characters: active.characters || [],
       exteriors: active.exteriors || [],
       props: active.props || [],
-      selectedStyleId: active.selectedStyleId || 'manga_color'
+      selectedStyleId: active.selectedStyleId || 'manga_color',
+      selectedGenreId: active.selectedGenreId || 'none'
     };
 
     // Always ensure srtContent and srtMeta are populated
@@ -1649,6 +1668,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
                 exteriors: [],
                 props: [],
                 selectedStyleId: 'manga_color',
+                selectedGenreId: 'none',
                 videoSaveDir: '',
                 autoDownloadVideo: false,
                 bgmSuggestions: [],
@@ -1857,6 +1877,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   getSelectedStyle: () => {
     const selectedId = get().currentProject.selectedStyleId || 'manga_color';
     return get().styles.find((s) => s.id === selectedId) || get().styles[0] || DEFAULT_STYLES[0];
+  },
+
+  // Story genres
+  setSelectedGenreId: (id) => {
+    set((state) => ({
+      currentProject: { ...state.currentProject, selectedGenreId: id }
+    }));
+    if (get().currentProject.id) {
+      get().saveCurrentProject().catch(err => console.error("Failed to auto-save project genre selection:", err));
+    }
+  },
+  getSelectedGenre: () => {
+    const selectedId = get().currentProject.selectedGenreId || 'none';
+    return getGenreById(selectedId);
   },
 
   systemLogs: [],
@@ -2336,6 +2370,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     exteriors: [] as ExteriorReference[],
     props: [] as PropReference[],
     selectedStyleId: 'manga_color',
+    selectedGenreId: 'none',
     videoSaveDir: '',
     autoDownloadVideo: false,
     bgmSuggestions: [] as BgmSuggestionRow[],
@@ -2709,6 +2744,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       exteriors: [],
       props: [],
       selectedStyleId: 'manga_color',
+      selectedGenreId: 'none',
       bgmSuggestions: [],
       bgmVolumeDb: -18,
       hookSegments: []
@@ -2731,6 +2767,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         exteriors: [],
         props: [],
         selectedStyleId: 'manga_color',
+        selectedGenreId: 'none',
         bgmSuggestions: [],
         bgmVolumeDb: -18,
         hookSegments: []
@@ -2767,6 +2804,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       exteriors: synced.exteriors || [],
       props: synced.props || [],
       selectedStyleId: synced.selectedStyleId || 'manga_color',
+      selectedGenreId: synced.selectedGenreId || 'none',
       videoSaveDir: active.videoSaveDir || '',
       autoDownloadVideo: !!active.autoDownloadVideo,
       bgmSuggestions: active.bgmSuggestions || [],
@@ -2829,6 +2867,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           exteriors: exts,
           props: propsList,
           selectedStyleId: proj.selectedStyleId || 'manga_color',
+          selectedGenreId: proj.selectedGenreId || 'none',
           videoSaveDir: proj.videoSaveDir || '',
           autoDownloadVideo: !!proj.autoDownloadVideo,
           bgmSuggestions: proj.bgmSuggestions || [],
@@ -2902,6 +2941,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         exteriors: JSON.parse(JSON.stringify(proj.exteriors || [])),
         props: JSON.parse(JSON.stringify(proj.props || [])),
         selectedStyleId: proj.selectedStyleId || 'manga_color',
+        selectedGenreId: proj.selectedGenreId || 'none',
         videoSaveDir: proj.videoSaveDir || '',
         autoDownloadVideo: !!proj.autoDownloadVideo,
         bgmSuggestions: JSON.parse(JSON.stringify(proj.bgmSuggestions || [])),
@@ -3396,12 +3436,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       let existingAccountId = '';
 
       const activeStyle = get().getSelectedStyle();
+      const selectedGenre = getGenreById(active.selectedGenreId);
+
       if (type === 'character') {
         const char = (active.characters || []).find(c => c.characterId.toLowerCase() === id.toLowerCase());
-        const details = [char?.gender, char?.age].filter(Boolean).join(', ') || 'Japanese individual';
-        const defaultPrompt = `Character Sheet of ${getDisplayName(id)}, 3-view reference sheet (front, side, back), full body, white background, modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism, ${activeStyle.characterSuffix}, ${details}, modern fashionable Japanese clothing, restrained emotional presence, natural standing posture, neutral facial expression, realistic fabric folds, cinematic realism, production design reference sheet.`;
+        const styleContext = selectedGenre.characterStyleContext || 'modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism';
+        const rolePrompt = getRoleSpecificPrompt(id, selectedGenre);
+        const details = [char?.gender, char?.age].filter(Boolean).join(', ') || 'individual';
+        const name = getDisplayName(id);
+        const defaultPrompt = `Character Sheet of ${name}, 3-view reference sheet (front, side, back), Official character concept art, full body, standing pose, pure white background, ${details}, ${rolePrompt.appearance}, wearing ${rolePrompt.clothing}, ${rolePrompt.accessories}, ${rolePrompt.posture}, ${rolePrompt.emotion}, Style: ${styleContext}, masterpiece, ultra detailed, sharp focus, official artwork, production quality`;
         
         prompt = char?.prompt || defaultPrompt;
+        if (!prompt.toLowerCase().includes('3-view reference sheet')) {
+          prompt = `Character Sheet of ${name}, 3-view reference sheet (front, side, back), ${prompt}`;
+        }
         if (char?.prompt) {
           if (prompt.includes('modern colored manga anime style')) {
             prompt = prompt.replace('modern colored manga anime style', activeStyle.characterSuffix);
@@ -3413,7 +3461,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         existingAccountId = char?.inputAccountId || '';
       } else if (type === 'exterior') {
         const ext = (active.exteriors || []).find(e => e.exteriorId.toLowerCase() === id.toLowerCase());
-        const defaultPrompt = `Background layout sheet of ${getDisplayName(id)}, 4-camera-angle sheet showing 4 different viewpoints/angles (front, reverse, left side, right side) of the same scene in a 2x2 grid layout, empty scene, no people, modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics, ${activeStyle.backgroundSuffix}, consistent furniture and layout across all 4 angles, realistic practical lighting, subtle emotional atmosphere, believable lived-in details, cinematic depth, production-ready environment design reference sheet.`;
+        const exteriorContext = selectedGenre.exteriorStyleContext || 'modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics';
+        const extPrompt = getExteriorSpecificPrompt(id, selectedGenre);
+        const defaultPrompt = `Official environment concept art, wide angle shot, empty scene, no people, ${extPrompt.elements}, ${extPrompt.lighting}, ${extPrompt.atmosphere}, Style: ${exteriorContext}, masterpiece, ultra detailed, atmospheric depth`;
         
         prompt = ext?.prompt || defaultPrompt;
         if (ext?.prompt) {
@@ -3427,7 +3477,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         existingAccountId = ext?.inputAccountId || '';
       } else if (type === 'prop') {
         const prop = (active.props || []).find(p => p.propId.toLowerCase() === id.toLowerCase());
-        const defaultPrompt = `Product layout sheet of ${getDisplayName(id)}, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white background, modern present-day Japan design, avoiding retro appearance, ${activeStyle.characterSuffix}, [detailed prop description showing consistent colors, materials, and form], realistic textures, clean studio lighting, production design reference sheet.`;
+        const propContext = selectedGenre.propStyleContext || 'modern present-day Japan design, avoiding retro appearance';
+        const propPrompt = getPropSpecificPrompt(id, selectedGenre);
+        const defaultPrompt = `Official product design sheet, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white studio background, ${propPrompt.materials}, ${propPrompt.details}, clean studio lighting, realistic textures, premium concept art, Style: ${propContext}`;
         
         prompt = prop?.prompt || defaultPrompt;
         if (prop?.prompt) {
@@ -5540,13 +5592,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
       const styleId = projData.selectedStyleId || 'manga_color';
       const activeStyle = get().styles.find(s => s.id === styleId) || get().styles[0] || DEFAULT_STYLES[0];
+      const selectedGenre = getGenreById(projData.selectedGenreId);
 
       if (type === 'character') {
         const char = (projData.characters || []).find((c: any) => c.characterId.toLowerCase() === id.toLowerCase());
-        const details = [char?.gender, char?.age].filter(Boolean).join(', ') || 'Japanese individual';
-        const defaultPrompt = `Character Sheet of ${getDisplayName(id)}, 3-view reference sheet (front, side, back), full body, white background, modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism, ${activeStyle.characterSuffix}, ${details}, modern fashionable Japanese clothing, restrained emotional presence, natural standing posture, neutral facial expression, realistic fabric folds, cinematic realism, production design reference sheet.`;
+        const styleContext = selectedGenre.characterStyleContext || 'modern present-day Japan (year 2026) realism, avoiding retro Shouwa-era appearance, grounded Japanese TV drama realism';
+        const rolePrompt = getRoleSpecificPrompt(id, selectedGenre);
+        const details = [char?.gender, char?.age].filter(Boolean).join(', ') || 'individual';
+        const name = getDisplayName(id);
+        const defaultPrompt = `Character Sheet of ${name}, 3-view reference sheet (front, side, back), Official character concept art, full body, standing pose, pure white background, ${details}, ${rolePrompt.appearance}, wearing ${rolePrompt.clothing}, ${rolePrompt.accessories}, ${rolePrompt.posture}, ${rolePrompt.emotion}, Style: ${styleContext}, masterpiece, ultra detailed, sharp focus, official artwork, production quality`;
         
         prompt = char?.prompt || defaultPrompt;
+        if (!prompt.toLowerCase().includes('3-view reference sheet')) {
+          prompt = `Character Sheet of ${name}, 3-view reference sheet (front, side, back), ${prompt}`;
+        }
         if (char?.prompt) {
           if (prompt.includes('modern colored manga anime style')) {
             prompt = prompt.replace('modern colored manga anime style', activeStyle.characterSuffix);
@@ -5558,7 +5617,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         referenceAccountId = char?.inputAccountId || '';
       } else if (type === 'exterior') {
         const ext = (projData.exteriors || []).find((e: any) => e.exteriorId.toLowerCase() === id.toLowerCase());
-        const defaultPrompt = `Background layout sheet of ${getDisplayName(id)}, 4-camera-angle sheet showing 4 different viewpoints/angles (front, reverse, left side, right side) of the same scene in a 2x2 grid layout, empty scene, no people, modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics, ${activeStyle.backgroundSuffix}, consistent furniture and layout across all 4 angles, realistic practical lighting, subtle emotional atmosphere, believable lived-in details, cinematic depth, production-ready environment design reference sheet.`;
+        const exteriorContext = selectedGenre.exteriorStyleContext || 'modern present-day Japan (year 2026) apartment realism, contemporary metropolitan Japanese design, avoiding retro Shouwa-era aesthetics';
+        const extPrompt = getExteriorSpecificPrompt(id, selectedGenre);
+        const defaultPrompt = `Official environment concept art, wide angle shot, empty scene, no people, ${extPrompt.elements}, ${extPrompt.lighting}, ${extPrompt.atmosphere}, Style: ${exteriorContext}, masterpiece, ultra detailed, atmospheric depth`;
         
         prompt = ext?.prompt || defaultPrompt;
         if (ext?.prompt) {
@@ -5572,7 +5633,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         referenceAccountId = ext?.inputAccountId || '';
       } else if (type === 'prop') {
         const prop = (projData.props || []).find((p: any) => p.propId.toLowerCase() === id.toLowerCase());
-        const defaultPrompt = `Product layout sheet of ${getDisplayName(id)}, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white background, modern present-day Japan design, avoiding retro appearance, ${activeStyle.characterSuffix}, [detailed prop description showing consistent colors, materials, and form], realistic textures, clean studio lighting, production design reference sheet.`;
+        const propContext = selectedGenre.propStyleContext || 'modern present-day Japan design, avoiding retro appearance';
+        const propPrompt = getPropSpecificPrompt(id, selectedGenre);
+        const defaultPrompt = `Official product design sheet, showing the item from multiple clean angles (front, side, isometric), isolated on a pure white studio background, ${propPrompt.materials}, ${propPrompt.details}, clean studio lighting, realistic textures, premium concept art, Style: ${propContext}`;
         
         prompt = prop?.prompt || defaultPrompt;
         if (prop?.prompt) {
