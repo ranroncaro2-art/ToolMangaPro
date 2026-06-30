@@ -245,8 +245,12 @@ async function generateTextContent(payload: any) {
     outputTokens = resJson.usage?.completion_tokens || 0;
 
   } else if (provider === 'gemini') {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    
+    // Tách các API Key từ chuỗi (hỗ trợ xuống dòng, dấu phẩy, dấu chấm phẩy)
+    const keys = apiKey.split(/[\n,;]+/).map((k: string) => k.trim()).filter(Boolean);
+    if (keys.length === 0) {
+      throw new Error('API Key is required');
+    }
+
     // Sanitize prompt and system prompt for Gemini
     const sanitizedPrompt = sanitizeContentForGemini(prompt);
     const sanitizedSystemPrompt = systemPrompt ? sanitizeContentForGemini(systemPrompt) : undefined;
@@ -291,60 +295,92 @@ async function generateTextContent(payload: any) {
       payloadData.generationConfig.responseSchema = responseSchema;
     }
 
-    const geminiRes = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payloadData)
-    });
+    let success = false;
+    let lastError: any = null;
 
-    if (!geminiRes.ok) {
-      const errData = await geminiRes.text();
-      throw new Error(`Gemini Error: ${errData}`);
-    }
+    for (let idx = 0; idx < keys.length; idx++) {
+      const currentKey = keys[idx];
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${currentKey}`;
+      
+      try {
+        console.log(`[Gemini Request] Sử dụng API Key ${idx + 1}/${keys.length}`);
+        const geminiRes = await fetch(geminiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payloadData)
+        });
 
-    const resJson = await geminiRes.json();
-    responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (!geminiRes.ok) {
+          const errData = await geminiRes.text();
+          throw new Error(`Gemini Error (HTTP ${geminiRes.status}): ${errData}`);
+        }
 
-    
-    if (!responseText) {
-      const candidate = resJson.candidates?.[0];
-      if (candidate) {
-        const finishReason = candidate.finishReason;
-        if (finishReason && finishReason !== 'STOP' && finishReason !== 'MAX_TOKENS') {
-          const ratings = candidate.safetyRatings
-            ? candidate.safetyRatings.map((r: any) => `${r.category}:${r.probability}`).join(', ')
-            : 'none';
-          console.error('[Gemini Blocked] Finish reason:', finishReason, 'Safety Ratings:', ratings);
-          console.error('[Gemini Blocked] Prompt content was:', prompt);
-          console.error('[Gemini Blocked] System prompt was:', systemPrompt);
-          
-          let friendlyTip = '';
-          if (finishReason === 'SAFETY') {
-            friendlyTip = ' (Lưu ý: Kịch bản hoặc nội dung tạo ra bị bộ lọc an toàn của Google chặn. Hãy thử sửa đổi kịch bản để tránh các từ ngữ nhạy cảm/bạo lực hoặc chuyển sang dùng OpenAI/Claude).';
+        const resJson = await geminiRes.json();
+        responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        if (!responseText) {
+          const candidate = resJson.candidates?.[0];
+          if (candidate) {
+            const finishReason = candidate.finishReason;
+            if (finishReason && finishReason !== 'STOP' && finishReason !== 'MAX_TOKENS') {
+              const ratings = candidate.safetyRatings
+                ? candidate.safetyRatings.map((r: any) => `${r.category}:${r.probability}`).join(', ')
+                : 'none';
+              console.error('[Gemini Blocked] Finish reason:', finishReason, 'Safety Ratings:', ratings);
+              console.error('[Gemini Blocked] Prompt content was:', prompt);
+              console.error('[Gemini Blocked] System prompt was:', systemPrompt);
+              
+              let friendlyTip = '';
+              if (finishReason === 'SAFETY') {
+                friendlyTip = ' (Lưu ý: Kịch bản hoặc nội dung tạo ra bị bộ lọc an toàn của Google chặn. Hãy thử sửa đổi kịch bản để tránh các từ ngữ nhạy cảm/bạo lực hoặc chuyển sang dùng OpenAI/Claude).';
+              }
+              const safetyError = new Error(`Gemini blocked or failed to generate text. Reason: ${finishReason}. Safety Ratings: ${ratings}.${friendlyTip}`);
+              (safetyError as any).isSafetyBlock = true;
+              throw safetyError;
+            }
           }
-          throw new Error(`Gemini blocked or failed to generate text. Reason: ${finishReason}. Safety Ratings: ${ratings}.${friendlyTip}`);
+          if (resJson.promptFeedback?.blockReason) {
+            console.error('[Gemini Blocked] Prompt was blocked. Reason:', resJson.promptFeedback.blockReason);
+            console.error('[Gemini Blocked] Prompt content was:', prompt);
+            console.error('[Gemini Blocked] System prompt was:', systemPrompt);
+            
+            let friendlyTip = '';
+            if (resJson.promptFeedback.blockReason === 'PROHIBITED_CONTENT') {
+              friendlyTip = ' (Lưu ý: Kịch bản hoặc phụ đề có chứa từ ngữ/hành động bị bộ lọc của Google chặn như cử chỉ nhạy cảm, bạo lực hoặc xúc phạm [Ví dụ: "giơ ngón giữa", "tay sai", "chửi bới"]. Hãy thử diễn đạt lại nhẹ nhàng hơn hoặc chuyển sang dùng OpenAI/Claude).';
+            }
+            const safetyError = new Error(`Gemini prompt was blocked. Reason: ${resJson.promptFeedback.blockReason}.${friendlyTip}`);
+            (safetyError as any).isSafetyBlock = true;
+            throw safetyError;
+          }
+          throw new Error(`Gemini returned an empty response.`);
         }
-      }
-      if (resJson.promptFeedback?.blockReason) {
-        console.error('[Gemini Blocked] Prompt was blocked. Reason:', resJson.promptFeedback.blockReason);
-        console.error('[Gemini Blocked] Prompt content was:', prompt);
-        console.error('[Gemini Blocked] System prompt was:', systemPrompt);
+
+        inputTokens = resJson.usageMetadata?.promptTokenCount || 0;
+        outputTokens = resJson.usageMetadata?.candidatesTokenCount || 0;
+        success = true;
+        break; // Thoát vòng lặp khi thành công
+      } catch (err: any) {
+        lastError = err;
+        console.error(`[Gemini Fallback] API Key ${idx + 1}/${keys.length} thất bại: ${err.message}`);
         
-        let friendlyTip = '';
-        if (resJson.promptFeedback.blockReason === 'PROHIBITED_CONTENT') {
-          friendlyTip = ' (Lưu ý: Kịch bản hoặc phụ đề có chứa từ ngữ/hành động bị bộ lọc của Google chặn như cử chỉ nhạy cảm, bạo lực hoặc xúc phạm [Ví dụ: "giơ ngón giữa", "tay sai", "chửi bới"]. Hãy thử diễn đạt lại nhẹ nhàng hơn hoặc chuyển sang dùng OpenAI/Claude).';
+        // Nếu lỗi do bị chặn an toàn (prompt block / safety block), dừng lại luôn để tránh phí công thử các key khác
+        if (err.isSafetyBlock || err.message?.includes('blocked') || err.message?.includes('PROHIBITED_CONTENT') || err.message?.includes('Safety Ratings')) {
+          throw err;
         }
-        throw new Error(`Gemini prompt was blocked. Reason: ${resJson.promptFeedback.blockReason}.${friendlyTip}`);
+        
+        // Nếu còn key khác, tiếp tục vòng lặp để thử key kế tiếp
+        if (idx < keys.length - 1) {
+          console.warn(`[Gemini Fallback] Tự động thử API Key tiếp theo...`);
+          continue;
+        }
       }
-      throw new Error(`Gemini returned an empty response.`);
     }
 
-
-
-    inputTokens = resJson.usageMetadata?.promptTokenCount || 0;
-    outputTokens = resJson.usageMetadata?.candidatesTokenCount || 0;
+    if (!success) {
+      throw new Error(`Tất cả ${keys.length} API Key Gemini đều thất bại. Lỗi cuối: ${lastError?.message}`);
+    }
 
   } else if (provider === 'claude') {
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {

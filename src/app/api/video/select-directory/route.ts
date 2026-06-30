@@ -141,11 +141,12 @@ export async function POST(request: NextRequest) {
       fs.mkdirSync(resolvedPath, { recursive: true });
     }
 
-    // Automatically create images, videos, voice, and bgm directories
+    // Automatically create images, videos, voice, bgm, and references directories
     const imagesDir = path.join(resolvedPath, 'images');
     const videosDir = path.join(resolvedPath, 'videos');
     const voiceDir = path.join(resolvedPath, 'voice');
     const bgmDir = path.join(resolvedPath, 'bgm');
+    const referencesDir = path.join(resolvedPath, 'references');
     
     if (!fs.existsSync(imagesDir)) {
       fs.mkdirSync(imagesDir, { recursive: true });
@@ -158,6 +159,9 @@ export async function POST(request: NextRequest) {
     }
     if (!fs.existsSync(bgmDir)) {
       fs.mkdirSync(bgmDir, { recursive: true });
+    }
+    if (!fs.existsSync(referencesDir)) {
+      fs.mkdirSync(referencesDir, { recursive: true });
     }
 
     return NextResponse.json({ success: true, path: resolvedPath });

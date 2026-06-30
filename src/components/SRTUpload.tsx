@@ -261,9 +261,9 @@ export default function SRTUpload({ onNextTab }: { onNextTab: () => void }) {
   };
 
   const handleAiAssignVoices = async () => {
-    const keyToUse = apiConfig.apiKeyFree || apiConfig.apiKey;
+    const keyToUse = apiConfig.apiKey;
     if (!keyToUse) {
-      alert('Vui lòng nhập API Key (hoặc API Key Free) trong phần cấu hình chung góc trên bên phải trước!');
+      alert('Vui lòng nhập API Key trong phần cấu hình chung góc trên bên phải trước!');
       return;
     }
     if (detectedCharacters.length === 0) {
@@ -626,7 +626,7 @@ Ví dụ:
     }
   };
 
-  const handleGenerateVoiceAndSrt = async () => {
+  const handleGenerateVoiceAndSrt = async (resume: boolean = false) => {
     if (!scriptText.trim()) {
       alert('Vui lòng nhập hoặc dán kịch bản kịch bản trước!');
       return;
@@ -636,7 +636,7 @@ Ví dụ:
       return;
     }
 
-    if (currentProject.sceneMapping && currentProject.sceneMapping.length > 0) {
+    if (!resume && currentProject.sceneMapping && currentProject.sceneMapping.length > 0) {
       const confirmReset = confirm(
         'Cảnh báo: Sinh phụ đề và voice mới từ kịch bản sẽ đặt lại dữ liệu phân cảnh (Scene Mapping) và các prompt hiện tại. Bạn có muốn tiếp tục?'
       );
@@ -669,7 +669,8 @@ Ví dụ:
           volumeScale,
           gapSeconds,
           scriptMode,
-          charVoiceMap
+          charVoiceMap,
+          resume
         })
       });
 
@@ -727,7 +728,10 @@ Ví dụ:
       if (finalData && finalData.success && finalData.srtContent) {
         setSrtContent(finalData.srtContent, currentProject.name);
         setCurrentProjectField('scriptContent', scriptText);
-        alert(`Sinh thành công phụ đề và ${finalData.fileCount} file giọng nói trong thư mục voice!`);
+        alert(resume
+          ? `Đã hoàn tất sinh tiếp phụ đề và các file giọng nói thành công!`
+          : `Sinh thành công phụ đề và ${finalData.fileCount} file giọng nói trong thư mục voice!`
+        );
       } else {
         throw new Error('Sinh giọng nói thất bại hoặc không nhận được kết quả hoàn tất.');
       }
@@ -1956,15 +1960,38 @@ Ví dụ:
                         </p>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={handleGenerateVoiceAndSrt}
-                        disabled={isAnyGenerating || !scriptText.trim() || speakers.length === 0 || !currentProject.videoSaveDir}
-                        className="w-full bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-slate-900 disabled:to-slate-950 disabled:text-gray-655 disabled:opacity-40 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg hover:shadow-violet-500/10 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed select-none flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-[0.98]"
-                      >
-                        <Sparkles className="w-4 h-4" />
-                        Sinh Giọng Đọc & Phụ Đề
-                      </button>
+                      currentProject.scriptContent ? (
+                        <div className="flex gap-2 w-full">
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateVoiceAndSrt(false)}
+                            disabled={isAnyGenerating || !scriptText.trim() || speakers.length === 0 || !currentProject.videoSaveDir}
+                            className="flex-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-[11px] font-bold py-2.5 px-3 rounded-xl transition duration-200 cursor-pointer disabled:cursor-not-allowed select-none flex items-center justify-center gap-1.5 active:scale-[0.98]"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+                            Sinh Mới
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateVoiceAndSrt(true)}
+                            disabled={isAnyGenerating || !scriptText.trim() || speakers.length === 0 || !currentProject.videoSaveDir}
+                            className="flex-1 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white text-[11px] font-bold py-2.5 px-3 rounded-xl shadow-lg hover:shadow-violet-500/10 transition duration-200 cursor-pointer disabled:cursor-not-allowed select-none flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-[0.98]"
+                          >
+                            <Play className="w-3 h-3 fill-current text-white" />
+                            Tạo Tiếp Voice
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateVoiceAndSrt(false)}
+                          disabled={isAnyGenerating || !scriptText.trim() || speakers.length === 0 || !currentProject.videoSaveDir}
+                          className="w-full bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:from-slate-900 disabled:to-slate-950 disabled:text-gray-655 disabled:opacity-40 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-lg hover:shadow-violet-500/10 transition-all duration-200 cursor-pointer disabled:cursor-not-allowed select-none flex items-center justify-center gap-1.5 hover:scale-[1.01] active:scale-[0.98]"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          Sinh Giọng Đọc & Phụ Đề
+                        </button>
+                      )
                     )}
                   </div>
                 </div>

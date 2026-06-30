@@ -58,8 +58,9 @@ export interface ImagePromptRow {
   mediaId?: string;
   accountId?: string;
   videoUrl?: string;
-  characterOverrides?: Record<string, { image: string; mediaId?: string; accountId?: string }>;
-  exteriorOverride?: { image: string; mediaId?: string; accountId?: string };
+    characterOverrides?: Record<string, { image: string; mediaId?: string; accountId?: string; mediaIdsByAccount?: Record<string, string> }>;
+    exteriorOverride?: { image: string; mediaId?: string; accountId?: string; mediaIdsByAccount?: Record<string, string> };
+  mediaIdsByAccount?: Record<string, string>;
 }
 
 export interface CharacterReference {
@@ -74,7 +75,8 @@ export interface CharacterReference {
   accountId?: string;
   inputImage?: string;
   inputMediaId?: string;
-  inputAccountId?: string;
+    inputAccountId?: string;
+  mediaIdsByAccount?: Record<string, string>;
 }
 
 export interface ExteriorReference {
@@ -85,7 +87,8 @@ export interface ExteriorReference {
   accountId?: string;
   inputImage?: string;
   inputMediaId?: string;
-  inputAccountId?: string;
+    inputAccountId?: string;
+  mediaIdsByAccount?: Record<string, string>;
 }
 
 export interface PropReference {
@@ -96,7 +99,8 @@ export interface PropReference {
   accountId?: string;
   inputImage?: string;
   inputMediaId?: string;
-  inputAccountId?: string;
+    inputAccountId?: string;
+  mediaIdsByAccount?: Record<string, string>;
 }
 
 const DB_NAME = 'MangaStoryboardDB';

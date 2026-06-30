@@ -600,24 +600,24 @@ interface ProjectState {
   // Character Reference
   characters: CharacterReference[];
   loadCharacters: () => Promise<void>;
-  addCharacter: (characterId: string, image: string, mediaId?: string, accountId?: string) => Promise<void>;
+    addCharacter: (characterId: string, image: string, mediaId?: string, accountId?: string, mediaIdsByAccount?: Record<string, string>) => Promise<void>;
   deleteCharacter: (characterId: string) => Promise<void>;
   updateCharacterPrompt: (characterId: string, prompt: string) => Promise<void>;
 
   // Exterior Reference
   exteriors: ExteriorReference[];
   loadExteriors: () => Promise<void>;
-  addExterior: (exteriorId: string, image: string, mediaId?: string, accountId?: string) => Promise<void>;
+    addExterior: (exteriorId: string, image: string, mediaId?: string, accountId?: string, mediaIdsByAccount?: Record<string, string>) => Promise<void>;
   deleteExterior: (exteriorId: string) => Promise<void>;
   updateExteriorPrompt: (exteriorId: string, prompt: string) => Promise<void>;
 
   // Prop Reference
   props: PropReference[];
   loadProps: () => Promise<void>;
-  addProp: (propId: string, image: string, mediaId?: string, accountId?: string) => Promise<void>;
+    addProp: (propId: string, image: string, mediaId?: string, accountId?: string, mediaIdsByAccount?: Record<string, string>) => Promise<void>;
   deleteProp: (propId: string) => Promise<void>;
   updatePropPrompt: (propId: string, prompt: string) => Promise<void>;
-  uploadImage: (file: File) => Promise<{ success: boolean; media_id: string }>;
+    uploadImage: (file: File, accountId?: string) => Promise<{ success: boolean; media_id: string; account_id?: string }>;
   updateAssetInputImage: (
     type: 'character' | 'exterior' | 'prop',
     id: string,
@@ -1682,10 +1682,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       };
     }
 
-    const apiKey = localStorage.getItem('ms_apiKey') || '';
+    let apiKey = localStorage.getItem('ms_apiKey') || '';
     const apiKeyFree = localStorage.getItem('ms_apiKeyFree') || '';
     const googleApiUrl = localStorage.getItem('ms_googleApiUrl') || 'http://127.0.0.1:5000';
     
+    // Tự động di trú API Key Free cũ vào API Key chính nếu chưa tồn tại
+    if (apiKeyFree && apiKeyFree.trim()) {
+      const trimmedFree = apiKeyFree.trim();
+      const existingKeys = apiKey.split(/[\n,;]+/).map(k => k.trim()).filter(Boolean);
+      if (!existingKeys.includes(trimmedFree)) {
+        existingKeys.push(trimmedFree);
+        apiKey = existingKeys.join('\n');
+        localStorage.setItem('ms_apiKey', apiKey);
+      }
+      localStorage.removeItem('ms_apiKeyFree');
+    }
+
     // Force default to Gemini if no API key is saved (resets old test cache)
     let provider = (localStorage.getItem('ms_provider') || 'gemini') as any;
     let modelName = localStorage.getItem('ms_modelName') || 'gemini-2.5-flash';
@@ -2035,13 +2047,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         .map((name) => {
           const char = findBestCharacterMatch(active.characters || [], name);
           const charId = char?.characterId || name;
-          const override = row.characterOverrides?.[charId];
+                    const override = row.characterOverrides?.[charId];
           if (override) {
             return {
               characterId: charId,
               image: override.image,
               mediaId: override.mediaId,
-              accountId: override.accountId
+              accountId: override.accountId,
+              mediaIdsByAccount: (override as any).mediaIdsByAccount
             };
           }
           return char;
@@ -2080,34 +2093,157 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (!extName) return undefined;
         const ext = findBestExteriorMatch(active.exteriors || [], extName);
         const extId = ext?.exteriorId || extName;
-        const override = row.exteriorOverride;
+                const override = row.exteriorOverride;
         if (override) {
           return {
             exteriorId: extId,
             image: override.image,
             mediaId: override.mediaId,
-            accountId: override.accountId
+            accountId: override.accountId,
+            mediaIdsByAccount: (override as any).mediaIdsByAccount
           };
         }
         return ext;
       })();
 
+            // 1. Fetch available image-generating accounts
+      let targetAccountId = '';
+      try {
+        const accRes = await fetch('/api/accounts');
+        if (accRes.ok) {
+          const accData = await accRes.json();
+                    const activeAccs = (accData.accounts || []).filter(
+            (a: any) => a.alive && !a.locked && (a.acc_type === 'image' || a.acc_type === 'both')
+          );
+          if (activeAccs.length > 0) {
+            const selectedAcc = activeAccs[Math.floor(Math.random() * activeAccs.length)];
+            targetAccountId = selectedAcc.id;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch accounts for shot generation:', err);
+      }
+
+      if (!targetAccountId) {
+        throw new Error('Không có tài khoản Veo hoạt động để vẽ ảnh phân cảnh!');
+      }
+
       const mediaIds: string[] = [];
-      let accountId = '';
 
-      matchedChars.forEach((c) => {
-        if (c.mediaId) mediaIds.push(c.mediaId);
-        if (c.accountId && !accountId) accountId = c.accountId;
-      });
+      // 2. Helper to verify and upload reference to targetAccountId if missing
+            const resolveMediaIdForAccount = async (ref: any, prefix: string, refId: string, assetType: 'character' | 'exterior' | 'prop'): Promise<string> => {
+        if (!ref.image) return '';
+        
+        if (ref.mediaIdsByAccount?.[targetAccountId]) {
+          return ref.mediaIdsByAccount[targetAccountId];
+        }
+        if (ref.accountId === targetAccountId && ref.mediaId) {
+          return ref.mediaId;
+        }
 
-      matchedProps.forEach((p) => {
-        if (p.mediaId) mediaIds.push(p.mediaId);
-        if (p.accountId && !accountId) accountId = p.accountId;
-      });
+        try {
+          const fileRes = await fetch(ref.image);
+          const blob = await fileRes.blob();
+          const fileName = `${prefix}_${refId}.png`;
+          const file = new File([blob], fileName, { type: blob.type || 'image/png' });
+          const uploadRes = await get().uploadImage(file, targetAccountId);
+          
+          if (uploadRes && uploadRes.success) {
+            const uploadedMediaId = uploadRes.media_id;
+            
+                        if (assetType === 'character') {
+              const isOverride = row.characterOverrides?.[refId] && row.characterOverrides[refId].image === ref.image;
+              if (isOverride) {
+                await runInProjectDbQueue(async () => {
+                  const latestProj = await getProject(active.id as string);
+                  if (latestProj) {
+                    latestProj.imagePrompts = latestProj.imagePrompts.map((p: any) => {
+                      if (p.stt === stt) {
+                        const characterOverrides = { ...(p.characterOverrides || {}) };
+                        const existingOverride = characterOverrides[refId] || {};
+                        characterOverrides[refId] = {
+                          image: existingOverride.image!,
+                          ...existingOverride,
+                          mediaIdsByAccount: {
+                            ...(existingOverride.mediaIdsByAccount || {}),
+                            [targetAccountId]: uploadedMediaId
+                          }
+                        };
+                        return { ...p, characterOverrides };
+                      }
+                      return p;
+                    });
+                    await saveProject(latestProj);
+                    if (get().currentProject.id === active.id) {
+                      set({ currentProject: latestProj });
+                    }
+                  }
+                });
+              } else {
+                await get().addCharacter(refId, ref.image, ref.mediaId, ref.accountId, {
+                  ...(ref.mediaIdsByAccount || {}),
+                  [targetAccountId]: uploadedMediaId
+                });
+              }
+                        } else if (assetType === 'exterior') {
+              const isOverride = row.exteriorOverride && row.exteriorOverride.image === ref.image;
+              if (isOverride) {
+                await runInProjectDbQueue(async () => {
+                  const latestProj = await getProject(active.id as string);
+                  if (latestProj) {
+                    latestProj.imagePrompts = latestProj.imagePrompts.map((p: any) => {
+                      if (p.stt === stt) {
+                        const exteriorOverride = {
+                          image: p.exteriorOverride!.image,
+                          ...(p.exteriorOverride || {}),
+                          mediaIdsByAccount: {
+                            ...(p.exteriorOverride?.mediaIdsByAccount || {}),
+                            [targetAccountId]: uploadedMediaId
+                          }
+                        };
+                        return { ...p, exteriorOverride };
+                      }
+                      return p;
+                    });
+                    await saveProject(latestProj);
+                    if (get().currentProject.id === active.id) {
+                      set({ currentProject: latestProj });
+                    }
+                  }
+                });
+              } else {
+                await get().addExterior(refId, ref.image, ref.mediaId, ref.accountId, {
+                  ...(ref.mediaIdsByAccount || {}),
+                  [targetAccountId]: uploadedMediaId
+                });
+              }
+            } else if (assetType === 'prop') {
+              await get().addProp(refId, ref.image, ref.mediaId, ref.accountId, {
+                ...(ref.mediaIdsByAccount || {}),
+                [targetAccountId]: uploadedMediaId
+              });
+            }
+            return uploadedMediaId;
+          }
+        } catch (uploadErr) {
+          console.error(`Failed to auto-upload reference ${prefix}_${refId} to account ${targetAccountId}:`, uploadErr);
+        }
+        return '';
+      };
 
-      if (matchedExt && matchedExt.mediaId) {
-        mediaIds.push(matchedExt.mediaId);
-        if (matchedExt.accountId && !accountId) accountId = matchedExt.accountId;
+      for (const c of matchedChars) {
+        const mid = await resolveMediaIdForAccount(c, 'character', c.characterId, 'character');
+        if (mid) mediaIds.push(mid);
+      }
+
+      for (const p of matchedProps) {
+        const mid = await resolveMediaIdForAccount(p, 'prop', p.propId, 'prop');
+        if (mid) mediaIds.push(mid);
+      }
+
+      if (matchedExt) {
+        const mid = await resolveMediaIdForAccount(matchedExt, 'exterior', matchedExt.exteriorId, 'exterior');
+        if (mid) mediaIds.push(mid);
       }
 
       const activeStyle = get().getSelectedStyle();
@@ -2147,12 +2283,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         googleApiUrl: get().apiConfig.googleApiUrl || ''
       };
 
-      if (mediaIds.length > 0) {
+            if (mediaIds.length > 0) {
         payload.media_ids = mediaIds;
       }
-      if (accountId) {
-        payload.account_id = accountId;
-      }
+      payload.account_id = targetAccountId;
 
       const delayTime = get().imageGenConfig.delayTime || 5;
       await enforceImageGenDelay(delayTime);
@@ -2202,15 +2336,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }
 
-      // Update store state
+            // Update store state
       set((state) => {
         const latestPrompts = state.currentProject.imagePrompts.map((p) => {
           if (p.stt === stt) {
+            const newMap = {
+              ...(p.mediaIdsByAccount || {}),
+              [resAccountId]: mediaId
+            };
             return {
               ...p,
               imageUrl,
               mediaId,
-              accountId: resAccountId
+              accountId: resAccountId,
+              mediaIdsByAccount: newMap
             };
           }
           return p;
@@ -2249,8 +2388,66 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         throw new Error('Chưa có ảnh phân cảnh. Vui lòng vẽ ảnh phân cảnh trước khi tạo video!');
       }
 
-      const refMediaId = row.mediaId || '';
-      const refAccountId = row.accountId || '';
+            let ultraAccountId = '';
+      try {
+        const accRes = await fetch('/api/accounts');
+        if (accRes.ok) {
+          const accData = await accRes.json();
+                    const activeAccs = (accData.accounts || []).filter(
+            (a: any) => a.alive && !a.locked && (a.acc_type === 'video' || a.acc_type === 'both')
+          );
+          if (activeAccs.length > 0) {
+            const selectedAcc = activeAccs[Math.floor(Math.random() * activeAccs.length)];
+            ultraAccountId = selectedAcc.id;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch accounts for video generation:', err);
+      }
+
+      if (!ultraAccountId) {
+        throw new Error('Không tìm thấy tài khoản Veo Ultra để tạo video!');
+      }
+
+      let refMediaId = row.mediaIdsByAccount?.[ultraAccountId] || '';
+      if (!refMediaId && row.accountId === ultraAccountId && row.mediaId) {
+        refMediaId = row.mediaId;
+      }
+
+      if (!refMediaId && row.imageUrl) {
+        try {
+          const fileRes = await fetch(row.imageUrl);
+          const blob = await fileRes.blob();
+          const file = new File([blob], `shot_${stt}.png`, { type: blob.type || 'image/png' });
+          const uploadRes = await get().uploadImage(file, ultraAccountId);
+          if (uploadRes && uploadRes.success) {
+            refMediaId = uploadRes.media_id;
+            
+            await runInProjectDbQueue(async () => {
+              const latestProj = await getProject(active.id as string);
+              if (latestProj) {
+                latestProj.imagePrompts = latestProj.imagePrompts.map((p) => {
+                  if (p.stt === stt) {
+                    const newMap = { ...(p.mediaIdsByAccount || {}), [ultraAccountId]: refMediaId };
+                    return { ...p, mediaIdsByAccount: newMap };
+                  }
+                  return p;
+                });
+                await saveProject(latestProj);
+                if (get().currentProject.id === active.id) {
+                  set({ currentProject: latestProj });
+                }
+              }
+            });
+          }
+        } catch (uploadErr) {
+          console.error(`Failed to auto-upload shot image to Ultra account for video generation:`, uploadErr);
+        }
+      }
+
+      if (!refMediaId) {
+        throw new Error('Không thể tải ảnh phân cảnh lên tài khoản Veo Ultra!');
+      }
 
       const payload: any = {
         projectId: active.id,
@@ -2258,7 +2455,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         prompt: row.motion || 'cinematic motion, slow pan',
         concurrency: get().videoGenConfig.concurrency || 1,
         aspect_ratio: get().videoGenConfig.aspectRatio || 'VIDEO_ASPECT_RATIO_LANDSCAPE',
-        model: refMediaId ? 'veo_3_1_r2v_lite_low_priority' : (get().videoGenConfig.model || 'veo_3_1_r2v_lite_low_priority'),
+        model: 'veo_3_1_r2v_lite_low_priority',
         duration: '4 Giây',
         count: get().videoGenConfig.count || 1,
         assetType: 'video',
@@ -2266,12 +2463,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         googleApiUrl: get().apiConfig.googleApiUrl || ''
       };
 
-      if (refMediaId) {
-        payload.media_ids = [refMediaId];
-      }
-      if (refAccountId) {
-        payload.account_id = refAccountId;
-      }
+      payload.media_ids = [refMediaId];
+      payload.account_id = ultraAccountId;
 
       const response = await fetch('/api/video/generate', {
         method: 'POST',
@@ -3168,7 +3361,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = get().currentProject.characters || [];
     set({ characters: list });
   },
-  addCharacter: async (characterId, image, mediaId, accountId) => {
+    addCharacter: async (characterId, image, mediaId, accountId, mediaIdsByAccount) => {
     let active = get().currentProject;
     if (!active.id) {
       await get().saveCurrentProject(active.name);
@@ -3180,14 +3373,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       );
       let updatedChars = [...(state.currentProject.characters || [])];
       if (existingIndex !== -1) {
+        const existing = updatedChars[existingIndex];
+        const newMap = { ...(existing.mediaIdsByAccount || {}), ...(mediaIdsByAccount || {}) };
+        if (accountId && mediaId) {
+          newMap[accountId] = mediaId;
+        }
         updatedChars[existingIndex] = {
-          ...updatedChars[existingIndex],
+          ...existing,
           image,
-          mediaId: mediaId !== undefined ? mediaId : updatedChars[existingIndex].mediaId,
-          accountId: accountId !== undefined ? accountId : updatedChars[existingIndex].accountId
+          mediaId: mediaId !== undefined ? mediaId : existing.mediaId,
+          accountId: accountId !== undefined ? accountId : existing.accountId,
+          mediaIdsByAccount: newMap
         };
       } else {
-        updatedChars.push({ characterId, image, mediaId, accountId });
+        const newMap = mediaIdsByAccount || {};
+        if (accountId && mediaId) {
+          newMap[accountId] = mediaId;
+        }
+        updatedChars.push({ characterId, image, mediaId, accountId, mediaIdsByAccount: newMap });
       }
       return {
         currentProject: { ...state.currentProject, characters: updatedChars },
@@ -3227,7 +3430,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = get().currentProject.exteriors || [];
     set({ exteriors: list });
   },
-  addExterior: async (exteriorId, image, mediaId, accountId) => {
+    addExterior: async (exteriorId, image, mediaId, accountId, mediaIdsByAccount) => {
     let active = get().currentProject;
     if (!active.id) {
       await get().saveCurrentProject(active.name);
@@ -3239,14 +3442,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       );
       let updatedExts = [...(state.currentProject.exteriors || [])];
       if (existingIndex !== -1) {
+        const existing = updatedExts[existingIndex];
+        const newMap = { ...(existing.mediaIdsByAccount || {}), ...(mediaIdsByAccount || {}) };
+        if (accountId && mediaId) {
+          newMap[accountId] = mediaId;
+        }
         updatedExts[existingIndex] = {
-          ...updatedExts[existingIndex],
+          ...existing,
           image,
-          mediaId: mediaId !== undefined ? mediaId : updatedExts[existingIndex].mediaId,
-          accountId: accountId !== undefined ? accountId : updatedExts[existingIndex].accountId
+          mediaId: mediaId !== undefined ? mediaId : existing.mediaId,
+          accountId: accountId !== undefined ? accountId : existing.accountId,
+          mediaIdsByAccount: newMap
         };
       } else {
-        updatedExts.push({ exteriorId, image, mediaId, accountId });
+        const newMap = mediaIdsByAccount || {};
+        if (accountId && mediaId) {
+          newMap[accountId] = mediaId;
+        }
+        updatedExts.push({ exteriorId, image, mediaId, accountId, mediaIdsByAccount: newMap });
       }
       return {
         currentProject: { ...state.currentProject, exteriors: updatedExts },
@@ -3286,7 +3499,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = get().currentProject.props || [];
     set({ props: list });
   },
-  addProp: async (propId, image, mediaId, accountId) => {
+    addProp: async (propId, image, mediaId, accountId, mediaIdsByAccount) => {
     let active = get().currentProject;
     if (!active.id) {
       await get().saveCurrentProject(active.name);
@@ -3298,14 +3511,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       );
       let updatedProps = [...(state.currentProject.props || [])];
       if (existingIndex !== -1) {
+        const existing = updatedProps[existingIndex];
+        const newMap = { ...(existing.mediaIdsByAccount || {}), ...(mediaIdsByAccount || {}) };
+        if (accountId && mediaId) {
+          newMap[accountId] = mediaId;
+        }
         updatedProps[existingIndex] = {
-          ...updatedProps[existingIndex],
+          ...existing,
           image,
-          mediaId: mediaId !== undefined ? mediaId : updatedProps[existingIndex].mediaId,
-          accountId: accountId !== undefined ? accountId : updatedProps[existingIndex].accountId
+          mediaId: mediaId !== undefined ? mediaId : existing.mediaId,
+          accountId: accountId !== undefined ? accountId : existing.accountId,
+          mediaIdsByAccount: newMap
         };
       } else {
-        updatedProps.push({ propId, image, mediaId, accountId });
+        const newMap = mediaIdsByAccount || {};
+        if (accountId && mediaId) {
+          newMap[accountId] = mediaId;
+        }
+        updatedProps.push({ propId, image, mediaId, accountId, mediaIdsByAccount: newMap });
       }
       return {
         currentProject: { ...state.currentProject, props: updatedProps },
@@ -3338,10 +3561,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     });
     await get().saveCurrentProject();
   },
-  uploadImage: async (file) => {
+    uploadImage: async (file, accountId) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('googleApiUrl', get().apiConfig.googleApiUrl || '');
+    if (accountId) {
+      formData.append('accountId', accountId);
+    }
     const response = await fetch('/api/upload_image', {
       method: 'POST',
       body: formData
@@ -4250,7 +4476,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
               volumeScale: voiceOptions.volumeScale,
               gapSeconds: voiceOptions.gapSeconds,
               scriptMode: voiceOptions.scriptMode,
-              charVoiceMap: voiceOptions.charVoiceMap
+              charVoiceMap: voiceOptions.charVoiceMap,
+              resume
             })
           });
 
@@ -4888,9 +5115,72 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     }));
 
-    const concurrency = get().videoGenConfig.concurrency || 1;
+        const concurrency = get().videoGenConfig.concurrency || 1;
 
     (async () => {
+      // 1. Resolve Ultra account and pre-upload shot images in parallel batches
+      try {
+        let ultraAccountId = '';
+        const accRes = await fetch('/api/accounts');
+        if (accRes.ok) {
+          const accData = await accRes.json();
+          const activeAccs = (accData.accounts || []).filter(
+            (a: any) => a.alive && !a.locked && (a.acc_type === 'video' || a.acc_type === 'both')
+          );
+          if (activeAccs.length > 0) {
+            ultraAccountId = activeAccs[0].id;
+          }
+        }
+
+        if (ultraAccountId) {
+          const activeProj = await getProject(projectId);
+          if (activeProj) {
+                        const toUpload = sttList
+              .map(stt => activeProj.imagePrompts.find(p => p.stt === stt))
+              .filter((row): row is any => !!row && !!row.imageUrl && !row.mediaIdsByAccount?.[ultraAccountId] && row.accountId !== ultraAccountId);
+
+            if (toUpload.length > 0) {
+              console.log(`Pre-uploading ${toUpload.length} shot images to Ultra account in batches of 20...`);
+              const batchSize = 20;
+              for (let i = 0; i < toUpload.length; i += batchSize) {
+                const chunk = toUpload.slice(i, i + batchSize);
+                await Promise.all(chunk.map(async (row) => {
+                  try {
+                    const fileRes = await fetch(row.imageUrl);
+                    const blob = await fileRes.blob();
+                    const file = new File([blob], `shot_${row.stt}.png`, { type: blob.type || 'image/png' });
+                    const uploadRes = await get().uploadImage(file, ultraAccountId);
+                    if (uploadRes && uploadRes.success) {
+                      const refMediaId = uploadRes.media_id;
+                      await runInProjectDbQueue(async () => {
+                        const latestProj = await getProject(projectId);
+                        if (latestProj) {
+                          latestProj.imagePrompts = latestProj.imagePrompts.map((p) => {
+                            if (p.stt === row.stt) {
+                              const newMap = { ...(p.mediaIdsByAccount || {}), [ultraAccountId]: refMediaId };
+                              return { ...p, mediaIdsByAccount: newMap };
+                            }
+                            return p;
+                          });
+                          await saveProject(latestProj);
+                          if (get().currentProject.id === projectId) {
+                            set({ currentProject: latestProj });
+                          }
+                        }
+                      });
+                    }
+                  } catch (err) {
+                    console.error(`Failed pre-uploading shot image for stt ${row.stt} to Ultra account:`, err);
+                  }
+                }));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error in batch video pre-upload step:', err);
+      }
+
       const tasks = [...sttList];
       let activeIndex = 0;
 
@@ -6045,3 +6335,7 @@ Yêu cầu:
     }
   }
 }));
+
+if (typeof window !== 'undefined') {
+  (window as any).useProjectStore = useProjectStore;
+}

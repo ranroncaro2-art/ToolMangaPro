@@ -160,6 +160,25 @@ async function executeTts(item: QueueItem): Promise<number> {
   return duration;
 }
 
+// Perform sequential execution with retries and GPU cooldown
+async function executeTtsWithRetry(item: QueueItem, retries = 3, delayMs = 2000): Promise<number> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const duration = await executeTts(item);
+      return duration;
+    } catch (err: any) {
+      console.warn(`[Voice API] Attempt ${attempt}/${retries} failed for text "${item.text.substring(0, 30)}...":`, err.message);
+      if (attempt === retries) {
+        throw err;
+      }
+      // Wait for GPU/CPU recovery and cooling
+      console.log(`[Voice API] Waiting ${delayMs}ms before retrying...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error('Failed to synthesize audio after retries');
+}
+
 // Queue execution manager
 async function processQueue() {
   if (isProcessing || voiceQueue.length === 0) return;
@@ -170,7 +189,7 @@ async function processQueue() {
     if (!item) break;
 
     try {
-      const duration = await executeTts(item);
+      const duration = await executeTtsWithRetry(item);
       item.resolve(duration);
     } catch (err) {
       item.reject(err);
@@ -217,7 +236,8 @@ export async function POST(req: NextRequest) {
       volumeScale = 1.0,
       gapSeconds = 0.2,
       scriptMode = 'single',
-      charVoiceMap = {}
+      charVoiceMap = {},
+      resume = false
     } = body;
 
     if (!scriptText || !scriptText.trim()) {
@@ -242,17 +262,24 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Clean existing files in the voice directory to start fresh
-          if (fs.existsSync(voiceDir)) {
-            const files = fs.readdirSync(voiceDir);
-            for (const file of files) {
-              const filePath = path.join(voiceDir, file);
-              if (fs.statSync(filePath).isFile()) {
-                fs.unlinkSync(filePath);
+          // Clean existing files in the voice directory if not resuming
+          if (!resume) {
+            if (fs.existsSync(voiceDir)) {
+              const files = fs.readdirSync(voiceDir);
+              for (const file of files) {
+                const filePath = path.join(voiceDir, file);
+                if (fs.statSync(filePath).isFile()) {
+                  fs.unlinkSync(filePath);
+                }
               }
+            } else {
+              fs.mkdirSync(voiceDir, { recursive: true });
             }
           } else {
-            fs.mkdirSync(voiceDir, { recursive: true });
+            // If resuming, ensure directory exists
+            if (!fs.existsSync(voiceDir)) {
+              fs.mkdirSync(voiceDir, { recursive: true });
+            }
           }
 
           const generatedFiles: string[] = [];
@@ -293,17 +320,38 @@ export async function POST(req: NextRequest) {
               }
             }
 
-            // Queue the job and await its sequential completion
-            const duration = await queueTtsJob({
-              text: ttsText,
-              speakerId: activeSpeakerId,
-              engineUrl: activeEngineUrl,
-              savePath,
-              speedScale: Number(speedScale),
-              pitchScale: Number(pitchScale),
-              intonationScale: Number(intonationScale),
-              volumeScale: Number(volumeScale)
-            });
+            let duration = 0;
+            let skipped = false;
+
+            // Check if we can reuse the existing file when resuming
+            if (resume && fs.existsSync(savePath)) {
+              try {
+                const stats = fs.statSync(savePath);
+                if (stats.isFile() && stats.size > 100) {
+                  duration = getAudioDuration(savePath);
+                  if (duration > 0) {
+                    skipped = true;
+                    console.log(`[Voice API] Skipped generating ${filename} (already exists with duration ${duration}s)`);
+                  }
+                }
+              } catch (skipErr) {
+                console.error(`[Voice API] Error checking existing file ${filename}, will regenerate:`, skipErr);
+              }
+            }
+
+            if (!skipped) {
+              // Queue the job and await its sequential completion
+              duration = await queueTtsJob({
+                text: ttsText,
+                speakerId: activeSpeakerId,
+                engineUrl: activeEngineUrl,
+                savePath,
+                speedScale: Number(speedScale),
+                pitchScale: Number(pitchScale),
+                intonationScale: Number(intonationScale),
+                volumeScale: Number(volumeScale)
+              });
+            }
 
             // Calculate SRT timings
             const startTime = currentTime;

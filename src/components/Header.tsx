@@ -44,6 +44,32 @@ export default function Header() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string; hasUpdate: boolean } | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateProgress, setUpdateProgress] = useState<{ status: string; percent: number } | null>(null);
+  
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [selectedUltraAccountId, setSelectedUltraAccountId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('ms_ultraAccountId') || '';
+    }
+    return '';
+  });
+
+  const handleUltraAccountChange = (val: string) => {
+    setSelectedUltraAccountId(val);
+    localStorage.setItem('ms_ultraAccountId', val);
+  };
+
+  React.useEffect(() => {
+    if (showSettings) {
+      fetch('/api/accounts')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.accounts) {
+            setAccounts(data.accounts);
+          }
+        })
+        .catch(err => console.error('Failed to fetch accounts in Header:', err));
+    }
+  }, [showSettings]);
 
   const handleCheckUpdate = async () => {
     setIsCheckingUpdate(true);
@@ -409,41 +435,34 @@ export default function Header() {
                     </span>
                   </div>
 
-                  <div>
+                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
                         <Key className="w-3.5 h-3.5 text-violet-400" />
                         API Key
                       </label>
                     </div>
-                    <input
-                      type="password"
-                      placeholder="Enter API key..."
-                      value={apiConfig.apiKey}
-                      onChange={(e) => setApiConfig({ apiKey: e.target.value })}
-                      className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition font-mono"
-                    />
+                    {apiConfig.provider === 'gemini' ? (
+                      <textarea
+                        rows={3}
+                        placeholder="Nhập một hoặc nhiều API key Gemini (Mỗi key một dòng)..."
+                        value={apiConfig.apiKey}
+                        onChange={(e) => setApiConfig({ apiKey: e.target.value })}
+                        className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition font-mono resize-none"
+                      />
+                    ) : (
+                      <input
+                        type="password"
+                        placeholder="Enter API key..."
+                        value={apiConfig.apiKey}
+                        onChange={(e) => setApiConfig({ apiKey: e.target.value })}
+                        className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition font-mono"
+                      />
+                    )}
                     <span className="text-[10px] text-gray-500 mt-1 block">
-                      Keys are stored locally in your browser.
-                    </span>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-                        <Key className="w-3.5 h-3.5 text-violet-400" />
-                        API Key Free
-                      </label>
-                    </div>
-                    <input
-                      type="password"
-                      placeholder="Enter Free API key..."
-                      value={apiConfig.apiKeyFree || ''}
-                      onChange={(e) => setApiConfig({ apiKeyFree: e.target.value })}
-                      className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition font-mono"
-                    />
-                    <span className="text-[10px] text-gray-500 mt-1 block">
-                      Dùng riêng cho việc tự động gán giọng đọc AI (Multi-Voice).
+                      {apiConfig.provider === 'gemini' 
+                        ? 'Có thể dán nhiều API Key (phân cách bằng dòng mới hoặc dấu phẩy). Hệ thống tự động chuyển đổi key tiếp theo khi hết quota.' 
+                        : 'Keys are stored locally in your browser.'}
                     </span>
                   </div>
 
@@ -636,6 +655,29 @@ export default function Header() {
                         <option value={4}>4 Luồng song song</option>
                         <option value={6}>6 Luồng song song</option>
                         <option value={8}>8 Luồng song song</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                        Tài khoản Veo Ultra (Tạo video)
+                      </label>
+                      <select
+                        value={selectedUltraAccountId}
+                        onChange={(e) => handleUltraAccountChange(e.target.value)}
+                        className="w-full bg-slate-950 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition cursor-pointer"
+                      >
+                        <option value="">-- Tự động chọn tài khoản Ultra --</option>
+                        {accounts
+                          .filter(a => a.alive)
+                          .map(a => (
+                            <option key={a.id} value={a.id}>
+                              {a.id} ({a.acc_type === 'both' ? 'Cả hai' : a.acc_type === 'video' ? 'Video' : 'Ảnh'}{a.locked ? ' - Bận' : ''})
+                            </option>
+                          ))
+                        }
                       </select>
                     </div>
                   </div>

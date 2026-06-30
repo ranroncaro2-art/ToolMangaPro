@@ -11,10 +11,14 @@ export async function POST(req: Request) {
 
     // Forward the file to the Python server
     const googleApiUrl = formData.get('googleApiUrl');
+    const accountId = formData.get('accountId') || formData.get('account_id');
     const baseUrl = googleApiUrl ? String(googleApiUrl).replace(/\/+$/, '') : 'http://127.0.0.1:5000';
     const targetUrl = `${baseUrl}/api/upload_image`;
     const uploadFormData = new FormData();
     uploadFormData.append('file', file);
+    if (accountId) {
+      uploadFormData.append('account_id', String(accountId));
+    }
 
     const response = await fetch(targetUrl, {
       method: 'POST',
